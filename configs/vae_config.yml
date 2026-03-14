@@ -1,13 +1,13 @@
 seed: 67 # Global random seed for reproducibility.
 model_type: vae # Model type: vae | dcgan | cgan | diffusion.
-epochs: 100 # Number of training epochs.
+epochs: 20 # Number of training epochs.
 batch_size: 128 # Training batch size.
 num_workers: 2 # DataLoader workers.
 lr: 0.0002 # Optimizer learning rate.
 latent_dim: 128 # VAE latent dimension size.
-base_channels: 64 # VAE channel width (capacity control).
+base_channels: 256 # VAE channel width (number of channels in the first conv layer, higher => more capacity).
 beta: 1.0 # Weight on KL term (beta-VAE).
-use_subset: false # Use a subset of the training data.
+use_subset: true # Use a subset of the training data.
 subset_mode: csv # Subset mode: csv | random.
 subset_csv_path: provided/training_20_percent.csv # CSV with subset indices (csv mode).
 subset_seed: 67 # Seed for random subset sampling.
