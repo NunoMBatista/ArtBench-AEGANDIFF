@@ -238,10 +238,12 @@ def main():
         total += batch.shape[0]
         if total >= config["eval_num_samples"]:
             break
-    real_images = np.concatenate(real_batches, axis=0)[: config["eval_num_samples"]]
+    real_images = np.concatenate(real_batches, axis=0)
+    target_samples = min(config["eval_num_samples"], real_images.shape[0])
+    real_images = real_images[:target_samples]
 
     with torch.no_grad():
-        fake_images = model.sample(config["eval_num_samples"], device=device).cpu().numpy()
+        fake_images = model.sample(target_samples, device=device).cpu().numpy()
 
     fid, kid_mean, kid_std = compute_fid_kid(
         real_images,

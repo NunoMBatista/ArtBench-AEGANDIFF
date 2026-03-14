@@ -8,15 +8,15 @@ latent_dim: 128 # VAE latent dimension size.
 base_channels: 256 # VAE channel width (number of channels in the first conv layer, higher => more capacity).
 beta: 1.0 # Weight on KL term (beta-VAE).
 use_subset: true # Use a subset of the training data.
-subset_mode: csv # Subset mode: csv | random.
+subset_mode: random # Subset mode: csv | random.
 subset_csv_path: provided/training_20_percent.csv # CSV with subset indices (csv mode).
 subset_seed: 67 # Seed for random subset sampling.
-subset_fraction: 0.2 # Fraction of training set (random mode, 0-1).
+subset_fraction: 0.01 # Fraction of training set (random mode, 0-1).
 kaggle_root: data # Path to Kaggle dataset root.
 eval_num_samples: 5000 # Samples for quick eval inside training.
 eval_metrics_batch_size: 32 # Batch size for FID/KID feature extraction.
-device: cuda # Device: cuda | cpu.
-run_prefix: run_vae # Prefix for outputs folder.
+device: cpu # Device: cuda | cpu.
+run_prefix: run_vae_very_small # Prefix for outputs folder.
 optimizer:
   name: adam # Optimizer name.
   betas: [0.9, 0.999] # Adam betas.
