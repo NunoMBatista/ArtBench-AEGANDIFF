@@ -131,6 +131,7 @@ def get_dataloaders(
 	subset_mode="csv",
 	subset_csv_path="provided/student_start_pack/training_20_percent.csv",
 	subset_seed=42,
+	subset_fraction=0.2,
 	kaggle_root="ArtBench-10",
 	shuffle_train=True,
 ):
@@ -146,7 +147,10 @@ def get_dataloaders(
 			)
 		elif subset_mode == "random":
 			rng = np.random.default_rng(int(subset_seed))
-			count = max(1, int(0.2 * train_images.shape[0]))
+			fraction = float(subset_fraction)
+			if fraction <= 0.0 or fraction > 1.0:
+				raise ValueError("subset_fraction must be in (0, 1]")
+			count = max(1, int(fraction * train_images.shape[0]))
 			subset_indices = rng.choice(train_images.shape[0], size=count, replace=False)
 			train_images, train_labels = _apply_subset(
 				train_images, train_labels, subset_indices

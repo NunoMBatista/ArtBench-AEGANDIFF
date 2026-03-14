@@ -178,6 +178,7 @@ def main():
         subset_mode=config["subset_mode"],
         subset_csv_path=config["subset_csv_path"],
         subset_seed=config["subset_seed"],
+        subset_fraction=config.get("subset_fraction", 0.2),
         kaggle_root=config["kaggle_root"],
     )
 
