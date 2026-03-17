@@ -1,0 +1,8 @@
+torch
+torchvision
+torchmetrics[image]
+numpy
+matplotlib
+pyyaml
+tqdm
+kaggle

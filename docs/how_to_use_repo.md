@@ -15,15 +15,16 @@
 ## Train
 
 ```bash
-python src/train.py configs/vae_config.yml
+python src/train.py configs/dcgan_config.yml --checkpoint outputs/run_dcgan_20260317/model.pt
 ```
+**Note:** ```--checkpoint``` paramter is optional
 
 - Outputs are written to `outputs/run_<model>_<timestamp>/`.
 
 ## Evaluate
 
 ```bash
-python src/evaluate.py
+python src/evaluate.py dcgan
 ```
 
 - Evaluation loads the latest VAE checkpoint from `outputs/run_vae_*`.

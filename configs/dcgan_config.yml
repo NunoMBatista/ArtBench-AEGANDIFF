@@ -1,0 +1,38 @@
+seed: 67
+device: "cpu"
+
+# Dataset
+kaggle_root: "data"
+batch_size: 128
+num_workers: 2
+use_subset: true
+subset_mode: "csv"
+subset_csv_path: "provided/training_20_percent.csv"
+subset_seed: 67
+
+# Model
+model_type: "dcgan"
+latent_dim: 100
+base_channels: 64
+use_spectral_norm: true # Constrains D's Lipschitz constant for better stability
+
+# Training
+epochs: 20
+lr: 0.0002 # Recommended learning rate for GANs (Radford et al.)
+beta: 1.0 # Not used for DCGAN but kept for compatibility
+run_prefix: "run_dcgan"
+
+# Optimizer (Adam)
+optimizer:
+  name: "adam"
+  # beta1=0.0 for stability with Spectral Norm (or 0.5 for standard DCGAN)
+  betas: [0.0, 0.999] 
+  weight_decay: 0.0
+
+# GAN specific training params
+d_updates_per_g: 1 # 1:1 is standard, but 2:1 or 5:1 can help if D is too weak
+
+# Evaluation
+eval_num_samples: 5000
+eval_metrics_batch_size: 32
+eval_interval_epochs: 5

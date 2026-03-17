@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +14,7 @@ from globals import ensure_repo_root
 ensure_repo_root()
 
 from src.models.VAE import VAE, vae_loss
+from src.models.DCGAN import DCGAN, dcgan_loss
 from src.utils.data_loader import get_dataloaders
 from src.utils.metrics import compute_fid_kid
 from src.utils.seed_setter import set_global_seed
@@ -40,10 +41,11 @@ def _move_batch_to_device(batch: Batch, device: torch.device) -> Batch:
 def run_epoch(
     model: torch.nn.Module,
     loader: torch.utils.data.DataLoader,
-    optimizer: torch.optim.Optimizer,
-    step_fn: StepFn,
+    optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    step_fn: Callable,
     device: torch.device,
     train: bool,
+    d_updates_per_g: int = 1,
 ):
 
     # Set the model to training or evaluation mode
@@ -62,15 +64,23 @@ def run_epoch(
         for batch in tqdm(loader, desc="train" if train else "eval", unit="batch"):
             batch = _move_batch_to_device(batch, device)
 
-            # Compute loss and metrics for the batch using the provided step function
-            # A step function takes the model, a batch of data and the device
-            loss, metrics = step_fn(model, batch, device, train)
-
-            # Perform backpropagation and optimization step
             if train:
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
+                if isinstance(optimizer, dict):
+                    # GAN mode: Handle multiple optimizers (D and G)
+                    # We pass the optimizers to the step function which handles the internal update logic
+                    loss, metrics = step_fn(model, batch, optimizer, device, train, d_updates_per_g)
+                else:
+                    # Standard mode (VAE)
+                    loss, metrics = step_fn(model, batch, device, train)
+                    optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    optimizer.step()
+            else:
+                # Evaluation mode
+                if isinstance(optimizer, dict):
+                    loss, metrics = step_fn(model, batch, optimizer, device, train, d_updates_per_g)
+                else:
+                    loss, metrics = step_fn(model, batch, device, train)
 
             batch_size = batch[0].shape[0]
 
@@ -94,6 +104,7 @@ def train_loop(
     val_loader: torch.utils.data.DataLoader = None,
     epochs: int = 10,
     device: torch.device = torch.device("cpu"),
+    d_updates_per_g: int = 1,
 ):
     history = []
 
@@ -101,7 +112,7 @@ def train_loop(
     for epoch in range(1, epochs + 1):
         # Run training
         train_loss, train_metrics = run_epoch(
-            model, train_loader, optimizer, step_fn, device, train=True
+            model, train_loader, optimizer, step_fn, device, train=True, d_updates_per_g=d_updates_per_g
         )
 
         # Log epoch index, training loss, training metrics and validation loss/metrics if val_loader is provided
@@ -114,7 +125,7 @@ def train_loop(
         # If a validation loader is provided, run validation and log those metrics as well
         if val_loader is not None:
             val_loss, val_metrics = run_epoch(
-                model, val_loader, optimizer, step_fn, device, train=False
+                model, val_loader, optimizer, step_fn, device, train=False, d_updates_per_g=d_updates_per_g
             )
             log.update(
                 {
@@ -128,7 +139,7 @@ def train_loop(
     return history
 
 
-def _make_run_dir(prefix: str = "run_vae") -> str:
+def _make_run_dir(prefix: str = "run_model") -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("outputs", f"{prefix}_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
@@ -152,25 +163,156 @@ def _save_history_plot(history, run_dir: str):
     plt.close()
 
 
-def _save_sample_grid(model: VAE, device: torch.device, run_dir: str, num_samples: int = 64):
+def _save_sample_grid(model, device: torch.device, run_dir: str, num_samples: int = 64):
     model.eval()
     with torch.no_grad():
-        samples = model.sample(num_samples, device=device).cpu()
+        if hasattr(model, "sample"):
+            samples = model.sample(num_samples, device=device).cpu()
+        else:
+            # Fallback for generic models
+            z = torch.randn(num_samples, model.latent_dim, 1, 1, device=device)
+            samples = model.generator(z).cpu()
     samples = samples.add(1.0).div(2.0).clamp(0.0, 1.0)
     grid = make_grid(samples, nrow=8)
     save_image(grid, os.path.join(run_dir, "samples.png"))
 
 
+def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
+    model_type = config["model_type"].lower()
+    latent_dim = config["latent_dim"]
+    base_channels = config.get("base_channels", 64)
+
+    if model_type == "vae":
+        return VAE(latent_dim=latent_dim, base_channels=base_channels).to(device)
+    elif model_type == "dcgan":
+        return DCGAN(
+            latent_dim=latent_dim,
+            base_channels=base_channels,
+            use_spectral_norm=config.get("use_spectral_norm", False)
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+
+def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]]:
+    model_type = config["model_type"].lower()
+    optim_cfg = config.get("optimizer", {"name": "adam"})
+    lr = config["lr"]
+    weight_decay = float(optim_cfg.get("weight_decay", 0.0))
+    betas = tuple(optim_cfg.get("betas", [0.9, 0.999]))
+
+    if model_type == "vae":
+        if optim_cfg["name"].lower() == "adam":
+            return torch.optim.Adam(
+                model.parameters(),
+                lr=lr,
+                betas=betas,
+                weight_decay=weight_decay,
+            )
+        raise ValueError(f"Unsupported optimizer for VAE: {optim_cfg['name']}")
+
+    elif model_type == "dcgan":
+        # GANs usually need specific betas for stability
+        g_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
+        d_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
+        
+        opt_g = torch.optim.Adam(
+            model.generator.parameters(),
+            lr=lr,
+            betas=g_betas,
+            weight_decay=weight_decay,
+        )
+        opt_d = torch.optim.Adam(
+            model.discriminator.parameters(),
+            lr=lr,
+            betas=d_betas,
+            weight_decay=weight_decay,
+        )
+        return {"opt_g": opt_g, "opt_d": opt_d}
+    
+    raise ValueError(f"Unsupported model_type for optimization: {model_type}")
+
+
+def get_step_fn(config: Dict) -> Callable:
+    model_type = config["model_type"].lower()
+    
+    if model_type == "vae":
+        beta = config.get("beta", 1.0)
+        def step_fn(model, batch, device, train):
+            images, _ = batch
+            recon, mu, logvar = model(images)
+            loss, metrics = vae_loss(recon, images, mu, logvar, beta=beta)
+            return loss, metrics
+        return step_fn
+
+    elif model_type == "dcgan":
+        def step_fn(model, batch, optimizers, device, train, d_updates_per_g=1):
+            images, _ = batch
+            batch_size = images.size(0)
+            real_label = 1.0
+            fake_label = 0.0
+
+            opt_g = optimizers["opt_g"]
+            opt_d = optimizers["opt_d"]
+
+            if train:
+                total_d_loss = 0
+                for _ in range(d_updates_per_g):
+                    opt_d.zero_grad()
+                    label_real = torch.full((batch_size,), real_label, device=device)
+                    output_real = model.discriminator(images)
+                    errD_real = dcgan_loss(output_real, label_real)
+                    
+                    noise = torch.randn(batch_size, model.latent_dim, device=device)
+                    fake = model.generator(noise)
+                    label_fake = torch.full((batch_size,), fake_label, device=device)
+                    output_fake = model.discriminator(fake.detach())
+                    errD_fake = dcgan_loss(output_fake, label_fake)
+                    
+                    errD = errD_real + errD_fake
+                    errD.backward()
+                    opt_d.step()
+                    total_d_loss += errD.item()
+
+                opt_g.zero_grad()
+                label_g = torch.full((batch_size,), real_label, device=device)
+                output_g = model.discriminator(fake)
+                errG = dcgan_loss(output_g, label_g)
+                errG.backward()
+                opt_g.step()
+
+                metrics = {
+                    "errD": total_d_loss / d_updates_per_g,
+                    "errG": errG.item(),
+                    "D_x": output_g.mean().item(),
+                }
+                return errG, metrics
+            else:
+                with torch.no_grad():
+                    noise = torch.randn(batch_size, model.latent_dim, device=device)
+                    fake = model.generator(noise)
+                    output_fake = model.discriminator(fake)
+                    output_real = model.discriminator(images)
+                    errG = dcgan_loss(output_fake, torch.full((batch_size,), real_label, device=device))
+                    errD = dcgan_loss(output_real, torch.full((batch_size,), real_label, device=device)) + \
+                           dcgan_loss(output_fake, torch.full((batch_size,), fake_label, device=device))
+                return errG, {"errD": errD.item(), "errG": errG.item()}
+        return step_fn
+    
+    raise ValueError(f"No step_fn for model_type: {model_type}")
+
+
 def main():
     if len(sys.argv) != 2:
-        print(f"gruda assim: {sys.argv[0]} <config.yml>")
+        print(f"Usage: {sys.argv[0]} <config.yml>")
         sys.exit(1)
 
     config_path = sys.argv[1]
     config = load_config(config_path)
     set_global_seed(config["seed"])
 
-    run_dir = _make_run_dir(config.get("run_prefix", "run_vae"))
+    model_type = config["model_type"].lower()
+    run_dir = _make_run_dir(config.get("run_prefix", f"run_{model_type}"))
 
     train_loader, val_loader, _ = get_dataloaders(
         batch_size=config["batch_size"],
@@ -183,54 +325,32 @@ def main():
         kaggle_root=config["kaggle_root"],
     )
 
-    device = torch.device(config["device"])
-    model_type = str(config.get("model_type", "vae")).lower()
-
-    if model_type == "vae":
-        model = VAE(
-            latent_dim=config["latent_dim"],
-            base_channels=config.get("base_channels", 64),
-        ).to(device)
-    elif model_type == "dcgan":
-        raise NotImplementedError("NÃO HÁ DCGAN CHIÇA")
-    elif model_type == "cgan":
-        raise NotImplementedError("NÃO HÁ CGAN CHIÇA")
-    elif model_type == "diffusion":
-        raise NotImplementedError("NÃO HÁ DIFFUSION CHIÇA")
+    requested_device = config.get("device", "cpu")
+    if requested_device == "cuda" and not torch.cuda.is_available():
+        print("WARNING: 'cuda' device requested but torch.cuda.is_available() is False. Falling back to 'cpu'.")
+        device = torch.device("cpu")
     else:
-        raise ValueError(f"Unknown model_type: {model_type}")
+        device = torch.device(requested_device)
 
-    optim_cfg = config.get("optimizer", {"name": "adam"})
-    if optim_cfg["name"].lower() == "adam":
-        optimizer = torch.optim.Adam(
-            model.parameters(),
-            lr=config["lr"],
-            betas=tuple(optim_cfg.get("betas", [0.9, 0.999])),
-            weight_decay=float(optim_cfg.get("weight_decay", 0.0)),
-        )
-    else:
-        # Add other optimizers later if needed, idk
-        raise ValueError(f"Unsupported optimizer: {optim_cfg['name']}")
-
-    def step_fn(model, batch, device, train):
-        images, _ = batch
-        recon, mu, logvar = model(images)
-        loss, metrics = vae_loss(recon, images, mu, logvar, beta=config["beta"])
-        return loss, metrics
+    model = get_model(config, device)
+    optimizer = get_optimizer(model, config)
+    step_fn = get_step_fn(config)
 
     history = train_loop(
         model,
         optimizer,
         step_fn,
         train_loader,
-        val_loader=None,
+        val_loader=val_loader if config.get("use_val", False) else None,
         epochs=config["epochs"],
         device=device,
+        d_updates_per_g=config.get("d_updates_per_g", 1)
     )
 
     _save_history_plot(history, run_dir)
     _save_sample_grid(model, device, run_dir)
 
+    # Simple evaluation at the end
     real_batches = []
     total = 0
     for batch, _ in train_loader:
@@ -248,7 +368,7 @@ def main():
     fid, kid_mean, kid_std = compute_fid_kid(
         real_images,
         fake_images,
-        device=config["device"],
+        device=device,
         batch_size=config["eval_metrics_batch_size"],
     )
 
@@ -267,7 +387,7 @@ def main():
     with open(os.path.join(run_dir, "config.yml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False)
 
-    torch.save({"model_state": model.state_dict()}, os.path.join(run_dir, "vae.pt"))
+    torch.save({"model_state": model.state_dict()}, os.path.join(run_dir, "model.pt"))
 
 
 if __name__ == "__main__":
