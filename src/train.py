@@ -403,8 +403,17 @@ def main():
     target_samples = min(config["eval_num_samples"], real_images.shape[0])
     real_images = real_images[:target_samples]
 
+    # Generate fake images in batches to avoid large one-shot allocations.
+    fake_batches = []
+    remaining = target_samples
+    gen_batch_size = int(config.get("eval_gen_batch_size", config["batch_size"]))
+    gen_batch_size = max(1, gen_batch_size)
     with torch.no_grad():
-        fake_images = model.sample(target_samples, device=device).cpu().numpy()
+        while remaining > 0:
+            cur = min(gen_batch_size, remaining)
+            fake_batches.append(model.sample(cur, device=device).cpu().numpy())
+            remaining -= cur
+    fake_images = np.concatenate(fake_batches, axis=0)
 
     fid, kid_mean, kid_std = compute_fid_kid(
         real_images,

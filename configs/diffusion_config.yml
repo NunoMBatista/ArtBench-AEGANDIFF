@@ -21,7 +21,7 @@ num_diffusion_steps: 1000
 cfg_dropout: 0.1 # Class dropout probability for classifier-free guidance.
 sample_steps: 100 # DDIM steps used by model.sample().
 guidance_scale: 2.0
-use_attention: false # Enable one bottleneck self-attention block in the UNet.
+use_attention: true # Enable one bottleneck self-attention block in the UNet.
 
 # Training
 epochs: 20
