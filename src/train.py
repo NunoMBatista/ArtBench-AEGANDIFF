@@ -113,9 +113,10 @@ def train_loop(
     epochs: int = 10,
     device: torch.device = torch.device("cpu"),
     d_updates_per_g: int = 1,
-    checkpoint_dir: str = None,
+    checkpoint_dir: Optional[str] = None,
     checkpoint_every_epochs: int = 0,
     epoch_logger: Optional[Callable[[Dict], None]] = None,
+    epoch_eval_fn: Optional[Callable[[int], Dict[str, float]]] = None,
 ):
     history = []
 
@@ -144,6 +145,11 @@ def train_loop(
                     **{f"val_{k}": v for k, v in val_metrics.items()},
                 }
             )
+
+        if epoch_eval_fn is not None:
+            extra_metrics = epoch_eval_fn(epoch)
+            if extra_metrics:
+                log.update(extra_metrics)
 
         history.append(log)
         print(log)
@@ -223,6 +229,56 @@ def _save_sample_grid(model, device: torch.device, run_dir: str, num_samples: in
     samples = samples.add(1.0).div(2.0).clamp(0.0, 1.0)
     grid = make_grid(samples, nrow=8)
     save_image(grid, os.path.join(run_dir, "samples.png"))
+
+
+def _compute_fid_kid_metrics(
+    model: torch.nn.Module,
+    train_loader: torch.utils.data.DataLoader,
+    device: torch.device,
+    num_samples: int,
+    metrics_batch_size: int,
+    gen_batch_size: int,
+) -> Dict[str, float]:
+    # This helper keeps FID/KID computation consistent for periodic and final evaluation.
+    was_training = model.training
+    model.eval()
+
+    real_batches = []
+    total = 0
+    for batch, _ in train_loader:
+        real_batches.append(batch.cpu().numpy())
+        total += batch.shape[0]
+        if total >= num_samples:
+            break
+    real_images = np.concatenate(real_batches, axis=0)
+    target_samples = min(num_samples, real_images.shape[0])
+    real_images = real_images[:target_samples]
+
+    fake_batches = []
+    remaining = target_samples
+    gen_batch_size = max(1, int(gen_batch_size))
+    with torch.no_grad():
+        while remaining > 0:
+            cur = min(gen_batch_size, remaining)
+            fake_batches.append(model.sample(cur, device=device).cpu().numpy())
+            remaining -= cur
+    fake_images = np.concatenate(fake_batches, axis=0)
+
+    fid, kid_mean, kid_std = compute_fid_kid(
+        real_images,
+        fake_images,
+        device=device,
+        batch_size=metrics_batch_size,
+    )
+
+    if was_training:
+        model.train()
+
+    return {
+        "fid": float(fid),
+        "kid_mean": float(kid_mean),
+        "kid_std": float(kid_std),
+    }
 
 
 def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
@@ -429,6 +485,30 @@ def main():
         if wandb_run is not None:
             wandb_run.log(log, step=log["epoch"])
 
+    fid_kid_every_epochs = int(config.get("fid_kid_every_epochs", 0))
+    fid_kid_num_samples = int(config.get("fid_kid_num_samples", config.get("eval_num_samples", 5000)))
+    fid_kid_metrics_batch_size = int(
+        config.get("fid_kid_metrics_batch_size", config.get("eval_metrics_batch_size", 32))
+    )
+    fid_kid_gen_batch_size = int(
+        config.get(
+            "fid_kid_gen_batch_size",
+            config.get("eval_gen_batch_size", config.get("batch_size", 32)),
+        )
+    )
+
+    def _epoch_eval_fn(epoch: int) -> Dict[str, float]:
+        if fid_kid_every_epochs <= 0 or (epoch % fid_kid_every_epochs != 0):
+            return {}
+        return _compute_fid_kid_metrics(
+            model=model,
+            train_loader=train_loader,
+            device=device,
+            num_samples=fid_kid_num_samples,
+            metrics_batch_size=fid_kid_metrics_batch_size,
+            gen_batch_size=fid_kid_gen_batch_size,
+        )
+
     history = train_loop(
         model,
         optimizer,
@@ -441,47 +521,21 @@ def main():
         checkpoint_dir=run_dir,
         checkpoint_every_epochs=int(config.get("checkpoint_every_epochs", 0)),
         epoch_logger=_epoch_logger,
+        epoch_eval_fn=_epoch_eval_fn,
     )
 
     _save_history_plot(history, run_dir)
     _save_sample_grid(model, device, run_dir)
 
     # Simple evaluation at the end
-    real_batches = []
-    total = 0
-    for batch, _ in train_loader:
-        real_batches.append(batch.cpu().numpy())
-        total += batch.shape[0]
-        if total >= config["eval_num_samples"]:
-            break
-    real_images = np.concatenate(real_batches, axis=0)
-    target_samples = min(config["eval_num_samples"], real_images.shape[0])
-    real_images = real_images[:target_samples]
-
-    # Generate fake images in batches to avoid large one-shot allocations.
-    fake_batches = []
-    remaining = target_samples
-    gen_batch_size = int(config.get("eval_gen_batch_size", config["batch_size"]))
-    gen_batch_size = max(1, gen_batch_size)
-    with torch.no_grad():
-        while remaining > 0:
-            cur = min(gen_batch_size, remaining)
-            fake_batches.append(model.sample(cur, device=device).cpu().numpy())
-            remaining -= cur
-    fake_images = np.concatenate(fake_batches, axis=0)
-
-    fid, kid_mean, kid_std = compute_fid_kid(
-        real_images,
-        fake_images,
+    metrics = _compute_fid_kid_metrics(
+        model=model,
+        train_loader=train_loader,
         device=device,
-        batch_size=config["eval_metrics_batch_size"],
+        num_samples=int(config["eval_num_samples"]),
+        metrics_batch_size=int(config["eval_metrics_batch_size"]),
+        gen_batch_size=int(config.get("eval_gen_batch_size", config["batch_size"])),
     )
-
-    metrics = {
-        "fid": fid,
-        "kid_mean": kid_mean,
-        "kid_std": kid_std,
-    }
 
     with open(os.path.join(run_dir, "metrics.yml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(metrics, f, sort_keys=False)
@@ -494,7 +548,7 @@ def main():
 
     torch.save({"model_state": model.state_dict()}, os.path.join(run_dir, "model.pt"))
 
-    if wandb_run is not None:
+    if wandb_run is not None and wandb is not None:
         try:
             wandb_run.log(metrics, step=len(history))
             samples_path = os.path.join(run_dir, "samples.png")

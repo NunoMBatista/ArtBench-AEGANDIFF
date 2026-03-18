@@ -24,7 +24,7 @@ guidance_scale: 2.0
 use_attention: false # Enable one bottleneck self-attention block in the UNet.
 
 # Training
-epochs: 20
+epochs: 50
 lr: 0.0002
 run_prefix: "run_diffusion"
 checkpoint_every_epochs: 5 # Save model_epoch_XXX.pt every N epochs (0 disables).
@@ -38,8 +38,15 @@ optimizer:
 # Evaluation
 eval_num_samples: 5000
 eval_metrics_batch_size: 32
+eval_gen_batch_size: 32 # Batched fake generation to avoid OOM at end-of-run evaluation.
 
-# Weights & Biases (optional)
+# Optional periodic FID/KID during training (0 disables)
+fid_kid_every_epochs: 4
+fid_kid_num_samples: 1000
+fid_kid_metrics_batch_size: 32
+fid_kid_gen_batch_size: 32
+
+# Weights & Biases
 wandb:
   enabled: true
   entity: "nunombatista-university-of-coimbra"
