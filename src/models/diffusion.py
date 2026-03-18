@@ -51,9 +51,10 @@ class ResidualBlock(nn.Module):
 class TinyUNet(nn.Module):
 	"""Small UNet designed for 32x32 images used in ArtBench-10."""
 
-	def __init__(self, in_channels: int, base_channels: int, cond_dim: int):
+	def __init__(self, in_channels: int, base_channels: int, cond_dim: int, use_attention: bool = False):
 		super().__init__()
 		c = base_channels
+		self.use_attention = use_attention
 
 		self.in_conv = nn.Conv2d(in_channels, c, kernel_size=3, padding=1)
 
@@ -64,6 +65,7 @@ class TinyUNet(nn.Module):
 		self.downsample2 = nn.Conv2d(c * 2, c * 4, kernel_size=4, stride=2, padding=1)
 
 		self.mid = ResidualBlock(c * 4, c * 4, cond_dim)
+		self.mid_attn = SelfAttention2d(c * 4) if use_attention else nn.Identity()
 
 		self.upsample1 = nn.ConvTranspose2d(c * 4, c * 2, kernel_size=4, stride=2, padding=1)
 		self.up1 = ResidualBlock(c * 4, c * 2, cond_dim)
@@ -84,6 +86,7 @@ class TinyUNet(nn.Module):
 		mid_in = self.downsample2(d2)
 
 		mid = self.mid(mid_in, cond)
+		mid = self.mid_attn(mid)
 
 		u1_in = self.upsample1(mid)
 		u1 = self.up1(torch.cat([u1_in, d2], dim=1), cond)
@@ -92,6 +95,41 @@ class TinyUNet(nn.Module):
 		u2 = self.up2(torch.cat([u2_in, d1], dim=1), cond)
 
 		return self.out_conv(F.silu(self.out_norm(u2)))
+
+
+class SelfAttention2d(nn.Module):
+	"""Minimal self-attention block over spatial tokens."""
+
+	def __init__(self, channels: int, num_heads: int = 4):
+		super().__init__()
+		if channels % num_heads != 0:
+			raise ValueError("channels must be divisible by num_heads")
+		self.channels = channels
+		self.num_heads = num_heads
+		self.head_dim = channels // num_heads
+
+		self.norm = nn.GroupNorm(8, channels)
+		self.qkv = nn.Conv2d(channels, channels * 3, kernel_size=1)
+		self.proj_out = nn.Conv2d(channels, channels, kernel_size=1)
+
+	def forward(self, x: torch.Tensor) -> torch.Tensor:
+		b, c, h, w = x.shape
+		h_in = x
+		x = self.norm(x)
+		qkv = self.qkv(x)
+		q, k, v = torch.chunk(qkv, 3, dim=1)
+
+		# Flatten spatial dims into tokens and apply multi-head scaled dot-product attention.
+		q = q.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
+		k = k.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
+		v = v.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
+
+		attn = torch.softmax(torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim), dim=-1)
+		out = torch.matmul(attn, v)
+
+		out = out.permute(0, 1, 3, 2).contiguous().view(b, c, h, w)
+		out = self.proj_out(out)
+		return h_in + out
 
 
 class DiffusionModel(nn.Module):
@@ -112,6 +150,7 @@ class DiffusionModel(nn.Module):
 		cfg_dropout: float = 0.1,
 		sample_steps: int = 100,
 		guidance_scale: float = 2.0,
+		use_attention: bool = False,
 		**_unused,
 	):
 		super().__init__()
@@ -124,6 +163,7 @@ class DiffusionModel(nn.Module):
 		self.cfg_dropout = float(cfg_dropout)
 		self.sample_steps = int(sample_steps)
 		self.guidance_scale = float(guidance_scale)
+		self.use_attention = bool(use_attention)
 
 		cond_dim = base_channels * 4
 		self.time_mlp = nn.Sequential(
@@ -135,7 +175,12 @@ class DiffusionModel(nn.Module):
 		# Extra class index is the null token used for classifier-free guidance.
 		self.null_class_idx = num_classes
 		self.class_emb = nn.Embedding(num_classes + 1, cond_dim)
-		self.unet = TinyUNet(in_channels=img_channels, base_channels=base_channels, cond_dim=cond_dim)
+		self.unet = TinyUNet(
+			in_channels=img_channels,
+			base_channels=base_channels,
+			cond_dim=cond_dim,
+			use_attention=self.use_attention,
+		)
 
 		betas = torch.linspace(1e-4, 2e-2, self.num_diffusion_steps, dtype=torch.float32)
 		alphas = 1.0 - betas

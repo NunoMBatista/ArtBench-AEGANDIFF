@@ -202,6 +202,7 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             cfg_dropout=config.get("cfg_dropout", 0.1),
             sample_steps=config.get("sample_steps", 100),
             guidance_scale=config.get("guidance_scale", 2.0),
+            use_attention=config.get("use_attention", False),
         ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")

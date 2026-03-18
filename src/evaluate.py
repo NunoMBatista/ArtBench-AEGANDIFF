@@ -46,6 +46,7 @@ class EvalConfig:
     cfg_dropout: float = 0.1
     sample_steps: int = 100
     guidance_scale: float = 2.0
+    use_attention: bool = False
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -63,6 +64,7 @@ class EvalConfig:
         self.cfg_dropout = train_cfg.get("cfg_dropout", self.cfg_dropout)
         self.sample_steps = train_cfg.get("sample_steps", self.sample_steps)
         self.guidance_scale = train_cfg.get("guidance_scale", self.guidance_scale)
+        self.use_attention = train_cfg.get("use_attention", self.use_attention)
         self.run_prefix = train_cfg.get("run_prefix", self.run_prefix)
         self.use_subset = train_cfg.get("use_subset", self.use_subset)
         self.subset_mode = train_cfg.get("subset_mode", self.subset_mode)
@@ -249,6 +251,7 @@ def main():
                 "cfg_dropout": config.cfg_dropout,
                 "sample_steps": config.sample_steps,
                 "guidance_scale": config.guidance_scale,
+                "use_attention": config.use_attention,
             }
         )
 
