@@ -187,6 +187,7 @@ class DiffusionModel(nn.Module):
 		alphas_cumprod = torch.cumprod(alphas, dim=0)
 		alphas_cumprod_prev = torch.cat([torch.ones(1, dtype=torch.float32), alphas_cumprod[:-1]], dim=0)
 
+		# Precompute diffusion coefficients once and keep them on the same device as the model.
 		self.register_buffer("betas", betas)
 		self.register_buffer("alphas", alphas)
 		self.register_buffer("alphas_cumprod", alphas_cumprod)
@@ -199,6 +200,7 @@ class DiffusionModel(nn.Module):
 		self.register_buffer("posterior_variance", posterior_var.clamp(min=1e-20))
 
 	def _gather(self, arr: torch.Tensor, t: torch.Tensor, x_shape: torch.Size) -> torch.Tensor:
+		# Gather per-timestep scalars and reshape for broadcast over (C, H, W).
 		out = arr.gather(0, t)
 		while out.ndim < len(x_shape):
 			out = out.unsqueeze(-1)
@@ -235,10 +237,12 @@ class DiffusionModel(nn.Module):
 			noise = torch.randn_like(x_start)
 		sqrt_alpha_bar = self._gather(self.sqrt_alphas_cumprod, t, x_start.shape)
 		sqrt_one_minus_alpha_bar = self._gather(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape)
+		# Forward process: progressively corrupt x_0 into x_t.
 		return sqrt_alpha_bar * x_start + sqrt_one_minus_alpha_bar * noise
 
 	def p_losses(self, x_start: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 		batch_size = x_start.size(0)
+		# Sample random timesteps so each batch trains denoising at different noise levels.
 		t = torch.randint(0, self.num_diffusion_steps, (batch_size,), device=x_start.device)
 		noise = torch.randn_like(x_start)
 		x_t = self.q_sample(x_start, t, noise)
@@ -253,6 +257,7 @@ class DiffusionModel(nn.Module):
 		if guidance_scale <= 1.0:
 			return self.predict_noise(x_t, t, y=y, class_drop_prob=0.0)
 
+		# Classifier-free guidance: combine conditional and unconditional predictions.
 		eps_cond = self.predict_noise(x_t, t, y=y, class_drop_prob=0.0)
 		eps_uncond = self.predict_noise(x_t, t, y=None, class_drop_prob=0.0)
 		return eps_uncond + guidance_scale * (eps_cond - eps_uncond)
@@ -276,6 +281,7 @@ class DiffusionModel(nn.Module):
 			labels = torch.randint(0, self.num_classes, (num_samples,), device=device)
 
 		if use_ddim:
+			# Uniformly subsample timesteps for faster deterministic DDIM inference.
 			step_indices = torch.linspace(
 				self.num_diffusion_steps - 1,
 				0,
@@ -289,6 +295,7 @@ class DiffusionModel(nn.Module):
 			t = torch.full((num_samples,), int(t_scalar.item()), device=device, dtype=torch.long)
 			eps = self._predict_eps_with_cfg(x, t, labels, guidance)
 
+			# Reconstruct x_0 estimate from current x_t and predicted noise.
 			alpha_bar_t = self._gather(self.alphas_cumprod, t, x.shape)
 			sqrt_alpha_bar_t = torch.sqrt(alpha_bar_t)
 			sqrt_one_minus_alpha_bar_t = torch.sqrt(1.0 - alpha_bar_t)
@@ -304,6 +311,7 @@ class DiffusionModel(nn.Module):
 				# Deterministic DDIM update (eta=0) for fast and stable sampling.
 				x = torch.sqrt(alpha_bar_next) * x0_pred + torch.sqrt(1.0 - alpha_bar_next) * eps
 			else:
+				# Ancestral DDPM step adds stochasticity through posterior variance noise.
 				alpha_t = self._gather(self.alphas, t, x.shape)
 				beta_t = self._gather(self.betas, t, x.shape)
 				sqrt_recip_alpha_t = self._gather(self.sqrt_recip_alphas, t, x.shape)
