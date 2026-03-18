@@ -3,7 +3,7 @@ device: "cpu"
 
 # Dataset
 kaggle_root: "data"
-batch_size: 64
+batch_size: 32
 num_workers: 2
 use_subset: true
 subset_mode: "csv"
@@ -21,12 +21,13 @@ num_diffusion_steps: 1000
 cfg_dropout: 0.1 # Class dropout probability for classifier-free guidance.
 sample_steps: 100 # DDIM steps used by model.sample().
 guidance_scale: 2.0
-use_attention: true # Enable one bottleneck self-attention block in the UNet.
+use_attention: false # Enable one bottleneck self-attention block in the UNet.
 
 # Training
 epochs: 20
 lr: 0.0002
 run_prefix: "run_diffusion"
+checkpoint_every_epochs: 5 # Save model_epoch_XXX.pt every N epochs (0 disables).
 
 # Optimizer
 optimizer:
@@ -37,3 +38,11 @@ optimizer:
 # Evaluation
 eval_num_samples: 5000
 eval_metrics_batch_size: 32
+
+# Weights & Biases (optional)
+wandb:
+  enabled: true
+  entity: "nunombatista-university-of-coimbra"
+  project: "ArtBench-AEGANDIFF"
+  # run_name: "diffusion-run"
+  tags: ["diffusion", "artbench"]

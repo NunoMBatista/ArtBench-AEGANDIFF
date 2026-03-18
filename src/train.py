@@ -1,17 +1,24 @@
 import os
 import sys
 from datetime import datetime
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import yaml
+from dotenv import load_dotenv
 from tqdm import tqdm
 from torchvision.utils import make_grid, save_image
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
+
 from globals import ensure_repo_root
 ensure_repo_root()
+load_dotenv()
 
 from src.models.VAE import VAE, vae_loss
 from src.models.DCGAN import DCGAN, dcgan_loss
@@ -106,6 +113,9 @@ def train_loop(
     epochs: int = 10,
     device: torch.device = torch.device("cpu"),
     d_updates_per_g: int = 1,
+    checkpoint_dir: str = None,
+    checkpoint_every_epochs: int = 0,
+    epoch_logger: Optional[Callable[[Dict], None]] = None,
 ):
     history = []
 
@@ -137,7 +147,44 @@ def train_loop(
 
         history.append(log)
         print(log)
+
+        if epoch_logger is not None:
+            epoch_logger(log)
+
+        # Optionally save intermediate checkpoints every N epochs.
+        if checkpoint_dir and checkpoint_every_epochs > 0 and (epoch % checkpoint_every_epochs == 0):
+            ckpt_name = f"model_epoch_{epoch:03d}.pt"
+            torch.save(
+                {"epoch": epoch, "model_state": model.state_dict()},
+                os.path.join(checkpoint_dir, ckpt_name),
+            )
     return history
+
+
+def _init_wandb(config: Dict, model_type: str, run_dir: str):
+    wandb_cfg = config.get("wandb", {}) or {}
+    if not wandb_cfg.get("enabled", False):
+        return None
+    if wandb is None:
+        print("WARNING: wandb is enabled in config but the package is not installed. Continuing without wandb.")
+        return None
+
+    try:
+        entity = wandb_cfg.get("entity") or os.getenv("WANDB_ENTITY")
+        project = wandb_cfg.get("project") or os.getenv("WANDB_PROJECT") or "ArtBench-AEGANDIFF"
+        run = wandb.init(
+            project=project,
+            entity=entity,
+            name=wandb_cfg.get("run_name", os.path.basename(run_dir)),
+            dir=run_dir,
+            config=config,
+            tags=wandb_cfg.get("tags", [model_type]),
+            notes=wandb_cfg.get("notes", ""),
+        )
+        return run
+    except Exception as e:
+        print(f"WARNING: failed to initialize wandb ({e}). Continuing without wandb.")
+        return None
 
 
 def _make_run_dir(prefix: str = "run_model") -> str:
@@ -354,6 +401,7 @@ def main():
 
     model_type = config["model_type"].lower()
     run_dir = _make_run_dir(config.get("run_prefix", f"run_{model_type}"))
+    wandb_run = _init_wandb(config, model_type, run_dir)
 
     train_loader, val_loader, _ = get_dataloaders(
         batch_size=config["batch_size"],
@@ -377,6 +425,10 @@ def main():
     optimizer = get_optimizer(model, config)
     step_fn = get_step_fn(config)
 
+    def _epoch_logger(log: Dict):
+        if wandb_run is not None:
+            wandb_run.log(log, step=log["epoch"])
+
     history = train_loop(
         model,
         optimizer,
@@ -385,7 +437,10 @@ def main():
         val_loader=val_loader if config.get("use_val", False) else None,
         epochs=config["epochs"],
         device=device,
-        d_updates_per_g=config.get("d_updates_per_g", 1)
+        d_updates_per_g=config.get("d_updates_per_g", 1),
+        checkpoint_dir=run_dir,
+        checkpoint_every_epochs=int(config.get("checkpoint_every_epochs", 0)),
+        epoch_logger=_epoch_logger,
     )
 
     _save_history_plot(history, run_dir)
@@ -438,6 +493,19 @@ def main():
         yaml.safe_dump(config, f, sort_keys=False)
 
     torch.save({"model_state": model.state_dict()}, os.path.join(run_dir, "model.pt"))
+
+    if wandb_run is not None:
+        try:
+            wandb_run.log(metrics, step=len(history))
+            samples_path = os.path.join(run_dir, "samples.png")
+            if os.path.isfile(samples_path):
+                wandb_run.log({"samples": wandb.Image(samples_path)}, step=len(history))
+
+            artifact = wandb.Artifact(name=os.path.basename(run_dir), type="training-run")
+            artifact.add_dir(run_dir)
+            wandb_run.log_artifact(artifact)
+        finally:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":

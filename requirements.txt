@@ -6,3 +6,5 @@ matplotlib
 pyyaml
 tqdm
 kaggle
+wandb
+python-dotenv

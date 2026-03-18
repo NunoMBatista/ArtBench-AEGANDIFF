@@ -1,16 +1,23 @@
 import argparse
 import os
-from dataclasses import dataclass
-from typing import Callable, Dict, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Tuple
 
 import numpy as np
 import torch
 import yaml
+from dotenv import load_dotenv
 from tqdm import tqdm
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 from globals import ensure_repo_root
 
 ensure_repo_root()
+load_dotenv()
 
 from src.models.VAE import VAE
 from src.models.DCGAN import DCGAN
@@ -47,6 +54,7 @@ class EvalConfig:
     sample_steps: int = 100
     guidance_scale: float = 2.0
     use_attention: bool = False
+    wandb: Dict[str, Any] = field(default_factory=lambda: {"enabled": False})
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -77,6 +85,40 @@ class EvalConfig:
         self.metrics_batch_size = train_cfg.get("metrics_batch_size", self.metrics_batch_size)
         self.checkpoint_path = train_cfg.get("checkpoint_path", self.checkpoint_path)
         self.device = train_cfg.get("device", self.device)
+        self.wandb = train_cfg.get("wandb", self.wandb)
+
+
+def _init_wandb_eval(config: EvalConfig, model_type: str, checkpoint_path: str):
+    wandb_cfg = config.wandb or {}
+    if not wandb_cfg.get("enabled", False):
+        return None
+    if wandb is None:
+        print("WARNING: wandb is enabled in config but the package is not installed. Continuing without wandb.")
+        return None
+
+    entity = wandb_cfg.get("entity") or os.getenv("WANDB_ENTITY")
+    project = wandb_cfg.get("project") or os.getenv("WANDB_PROJECT") or "ArtBench-AEGANDIFF"
+    run_name = wandb_cfg.get("eval_run_name") or f"eval-{model_type}-{os.path.basename(os.path.dirname(checkpoint_path))}"
+
+    try:
+        run = wandb.init(
+            project=project,
+            entity=entity,
+            name=run_name,
+            config={
+                "model_type": model_type,
+                "checkpoint_path": checkpoint_path,
+                "num_samples": config.num_samples,
+                "metrics_batch_size": config.metrics_batch_size,
+                "device": config.device,
+            },
+            tags=wandb_cfg.get("tags", ["evaluation", model_type]),
+            notes=wandb_cfg.get("notes", ""),
+        )
+        return run
+    except Exception as e:
+        print(f"WARNING: failed to initialize wandb for evaluation ({e}). Continuing without wandb.")
+        return None
 
 
 def sample_real_images(config: EvalConfig) -> np.ndarray:
@@ -237,6 +279,7 @@ def main():
     ckpt_path = config.checkpoint_path or _find_latest_checkpoint(model_type)
     config.update(ckpt_path)
     device = torch.device(config.device)
+    wandb_run = _init_wandb_eval(config, model_type, ckpt_path)
 
     extra_kwargs = {}
     if model_type == "dcgan":
@@ -269,7 +312,14 @@ def main():
         return model.sample(num_samples, device)
 
     fid, kid_mean, kid_std = evaluate(config, sampler)
-    print({"fid": fid, "kid_mean": kid_mean, "kid_std": kid_std})
+    result = {"fid": fid, "kid_mean": kid_mean, "kid_std": kid_std}
+    print(result)
+
+    if wandb_run is not None:
+        try:
+            wandb_run.log(result)
+        finally:
+            wandb_run.finish()
 
 
 if __name__ == "__main__":
