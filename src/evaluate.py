@@ -14,6 +14,7 @@ ensure_repo_root()
 
 from src.models.VAE import VAE
 from src.models.DCGAN import DCGAN
+from src.models.diffusion import DiffusionModel
 from src.utils.data_loader import get_dataloaders
 from src.utils.metrics import compute_fid_kid
 from src.utils.seed_setter import set_global_seed
@@ -38,6 +39,13 @@ class EvalConfig:
     latent_dim: int = 128
     base_channels: int = 64
     use_spectral_norm: bool = False
+    image_size: int = 32
+    img_channels: int = 3
+    num_classes: int = 10
+    num_diffusion_steps: int = 1000
+    cfg_dropout: float = 0.1
+    sample_steps: int = 100
+    guidance_scale: float = 2.0
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -48,6 +56,13 @@ class EvalConfig:
         self.latent_dim = train_cfg.get("latent_dim", self.latent_dim)
         self.base_channels = train_cfg.get("base_channels", self.base_channels)
         self.use_spectral_norm = train_cfg.get("use_spectral_norm", self.use_spectral_norm)
+        self.image_size = train_cfg.get("image_size", self.image_size)
+        self.img_channels = train_cfg.get("img_channels", self.img_channels)
+        self.num_classes = train_cfg.get("num_classes", self.num_classes)
+        self.num_diffusion_steps = train_cfg.get("num_diffusion_steps", self.num_diffusion_steps)
+        self.cfg_dropout = train_cfg.get("cfg_dropout", self.cfg_dropout)
+        self.sample_steps = train_cfg.get("sample_steps", self.sample_steps)
+        self.guidance_scale = train_cfg.get("guidance_scale", self.guidance_scale)
         self.run_prefix = train_cfg.get("run_prefix", self.run_prefix)
         self.use_subset = train_cfg.get("use_subset", self.use_subset)
         self.subset_mode = train_cfg.get("subset_mode", self.subset_mode)
@@ -144,6 +159,7 @@ def _find_latest_checkpoint(model_type: str) -> str:
 _MODEL_REGISTRY: Dict[str, type] = {
     "vae": VAE,
     "dcgan": DCGAN,
+    "diffusion": DiffusionModel,
 }
 
 
@@ -223,6 +239,18 @@ def main():
     extra_kwargs = {}
     if model_type == "dcgan":
         extra_kwargs["use_spectral_norm"] = config.use_spectral_norm
+    elif model_type == "diffusion":
+        extra_kwargs.update(
+            {
+                "image_size": config.image_size,
+                "img_channels": config.img_channels,
+                "num_classes": config.num_classes,
+                "num_diffusion_steps": config.num_diffusion_steps,
+                "cfg_dropout": config.cfg_dropout,
+                "sample_steps": config.sample_steps,
+                "guidance_scale": config.guidance_scale,
+            }
+        )
 
     model = _load_model(
         model_type,

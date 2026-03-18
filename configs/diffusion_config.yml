@@ -1,0 +1,38 @@
+seed: 67
+device: "cpu"
+
+# Dataset
+kaggle_root: "data"
+batch_size: 64
+num_workers: 2
+use_subset: true
+subset_mode: "csv"
+subset_csv_path: "provided/training_20_percent.csv"
+subset_seed: 67
+
+# Model
+model_type: "diffusion"
+latent_dim: 128 # Kept for compatibility with shared model factory.
+base_channels: 128
+img_channels: 3
+image_size: 32
+num_classes: 10
+num_diffusion_steps: 1000
+cfg_dropout: 0.1 # Class dropout probability for classifier-free guidance.
+sample_steps: 100 # DDIM steps used by model.sample().
+guidance_scale: 2.0
+
+# Training
+epochs: 20
+lr: 0.0002
+run_prefix: "run_diffusion"
+
+# Optimizer
+optimizer:
+  name: "adamw"
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+# Evaluation
+eval_num_samples: 5000
+eval_metrics_batch_size: 32

@@ -15,6 +15,7 @@ ensure_repo_root()
 
 from src.models.VAE import VAE, vae_loss
 from src.models.DCGAN import DCGAN, dcgan_loss
+from src.models.diffusion import DiffusionModel
 from src.utils.data_loader import get_dataloaders
 from src.utils.metrics import compute_fid_kid
 from src.utils.seed_setter import set_global_seed
@@ -179,7 +180,7 @@ def _save_sample_grid(model, device: torch.device, run_dir: str, num_samples: in
 
 def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
     model_type = config["model_type"].lower()
-    latent_dim = config["latent_dim"]
+    latent_dim = config.get("latent_dim", 128)
     base_channels = config.get("base_channels", 64)
 
     if model_type == "vae":
@@ -189,6 +190,18 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             latent_dim=latent_dim,
             base_channels=base_channels,
             use_spectral_norm=config.get("use_spectral_norm", False)
+        ).to(device)
+    elif model_type == "diffusion":
+        return DiffusionModel(
+            latent_dim=latent_dim,
+            base_channels=base_channels,
+            img_channels=config.get("img_channels", 3),
+            image_size=config.get("image_size", 32),
+            num_classes=config.get("num_classes", 10),
+            num_diffusion_steps=config.get("num_diffusion_steps", 1000),
+            cfg_dropout=config.get("cfg_dropout", 0.1),
+            sample_steps=config.get("sample_steps", 100),
+            guidance_scale=config.get("guidance_scale", 2.0),
         ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
@@ -229,6 +242,24 @@ def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Opt
             weight_decay=weight_decay,
         )
         return {"opt_g": opt_g, "opt_d": opt_d}
+
+    elif model_type == "diffusion":
+        opt_name = optim_cfg.get("name", "adamw").lower()
+        if opt_name == "adamw":
+            return torch.optim.AdamW(
+                model.parameters(),
+                lr=lr,
+                betas=betas,
+                weight_decay=weight_decay,
+            )
+        if opt_name == "adam":
+            return torch.optim.Adam(
+                model.parameters(),
+                lr=lr,
+                betas=betas,
+                weight_decay=weight_decay,
+            )
+        raise ValueError(f"Unsupported optimizer for diffusion: {optim_cfg['name']}")
     
     raise ValueError(f"Unsupported model_type for optimization: {model_type}")
 
@@ -297,6 +328,15 @@ def get_step_fn(config: Dict) -> Callable:
                     errD = dcgan_loss(output_real, torch.full((batch_size,), real_label, device=device)) + \
                            dcgan_loss(output_fake, torch.full((batch_size,), fake_label, device=device))
                 return errG, {"errD": errD.item(), "errG": errG.item()}
+        return step_fn
+
+    elif model_type == "diffusion":
+        def step_fn(model, batch, device, train):
+            images, labels = batch
+
+            # Diffusion loss is MSE between true and predicted noise at random timesteps.
+            loss = model(images, labels)
+            return loss, {"noise_mse": float(loss.item())}
         return step_fn
     
     raise ValueError(f"No step_fn for model_type: {model_type}")
