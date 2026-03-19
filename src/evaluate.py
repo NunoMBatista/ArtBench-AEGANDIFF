@@ -53,12 +53,14 @@ class EvalConfig:
     cfg_dropout: float = 0.1
     sample_steps: int = 100
     guidance_scale: float = 2.0
+    class_conditional: bool = True
     use_attention: bool = False
     wandb: Dict[str, Any] = field(default_factory=lambda: {"enabled": False})
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     def update(self, path):
+        # Evaluation reuses training config from the run folder to avoid mismatch.
         config_path = os.path.join(os.path.dirname(path), "config.yml")
         with open(config_path, "r", encoding="utf-8") as f:
             train_cfg = yaml.safe_load(f) or {}
@@ -72,6 +74,7 @@ class EvalConfig:
         self.cfg_dropout = train_cfg.get("cfg_dropout", self.cfg_dropout)
         self.sample_steps = train_cfg.get("sample_steps", self.sample_steps)
         self.guidance_scale = train_cfg.get("guidance_scale", self.guidance_scale)
+        self.class_conditional = train_cfg.get("class_conditional", self.class_conditional)
         self.use_attention = train_cfg.get("use_attention", self.use_attention)
         self.run_prefix = train_cfg.get("run_prefix", self.run_prefix)
         self.use_subset = train_cfg.get("use_subset", self.use_subset)
@@ -89,6 +92,7 @@ class EvalConfig:
 
 
 def _init_wandb_eval(config: EvalConfig, model_type: str, checkpoint_path: str):
+    # Evaluation logging mirrors training behavior but stays optional.
     wandb_cfg = config.wandb or {}
     if not wandb_cfg.get("enabled", False):
         return None
@@ -196,6 +200,7 @@ def _find_latest_checkpoint(model_type: str) -> str:
             f"No {model_type} checkpoints found under outputs/{prefix}*"
         )
 
+    # Pick newest checkpoint so "evaluate <model_type>" works without manual paths.
     return max(candidates, key=os.path.getmtime)
 
 
@@ -241,7 +246,7 @@ def evaluate(config: EvalConfig, sampler_fn: SamplerFn) -> Tuple[float, float, f
     real_images = sample_real_images(config)
     fake_images = sample_fake_images(config, sampler_fn)
 
-    # compute metrics
+    # Metrics are computed on matched real/fake sample counts.
     fid, kid_mean, kid_std = compute_fid_kid(
         real_images,
         fake_images,
@@ -276,6 +281,7 @@ def main():
     if args.checkpoint:
         config.checkpoint_path = args.checkpoint
 
+    # Prefer explicit checkpoint, otherwise fall back to latest run artifact.
     ckpt_path = config.checkpoint_path or _find_latest_checkpoint(model_type)
     config.update(ckpt_path)
     device = torch.device(config.device)
@@ -294,6 +300,7 @@ def main():
                 "cfg_dropout": config.cfg_dropout,
                 "sample_steps": config.sample_steps,
                 "guidance_scale": config.guidance_scale,
+                "class_conditional": config.class_conditional,
                 "use_attention": config.use_attention,
             }
         )

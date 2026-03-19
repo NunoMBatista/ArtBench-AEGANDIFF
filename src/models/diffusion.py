@@ -150,6 +150,7 @@ class DiffusionModel(nn.Module):
 		cfg_dropout: float = 0.1,
 		sample_steps: int = 100,
 		guidance_scale: float = 2.0,
+		class_conditional: bool = True,
 		use_attention: bool = False,
 		**_unused,
 	):
@@ -163,6 +164,7 @@ class DiffusionModel(nn.Module):
 		self.cfg_dropout = float(cfg_dropout)
 		self.sample_steps = int(sample_steps)
 		self.guidance_scale = float(guidance_scale)
+		self.class_conditional = bool(class_conditional)
 		self.use_attention = bool(use_attention)
 
 		cond_dim = base_channels * 4
@@ -210,6 +212,10 @@ class DiffusionModel(nn.Module):
 		time_emb = _sinusoidal_timestep_embedding(t, self.class_emb.embedding_dim)
 		time_emb = self.time_mlp(time_emb)
 
+		# In unconditional mode, always use the null class embedding.
+		if not self.class_conditional:
+			y = None
+
 		if y is None:
 			y_idx = torch.full_like(t, self.null_class_idx)
 		else:
@@ -240,7 +246,7 @@ class DiffusionModel(nn.Module):
 		# Forward process: progressively corrupt x_0 into x_t.
 		return sqrt_alpha_bar * x_start + sqrt_one_minus_alpha_bar * noise
 
-	def p_losses(self, x_start: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+	def p_losses(self, x_start: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
 		batch_size = x_start.size(0)
 		# Sample random timesteps so each batch trains denoising at different noise levels.
 		t = torch.randint(0, self.num_diffusion_steps, (batch_size,), device=x_start.device)
@@ -250,10 +256,14 @@ class DiffusionModel(nn.Module):
 		pred_noise = self.predict_noise(x_t, t, y=y, class_drop_prob=self.cfg_dropout)
 		return F.mse_loss(pred_noise, noise)
 
-	def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+	def forward(self, x: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
 		return self.p_losses(x, y)
 
-	def _predict_eps_with_cfg(self, x_t: torch.Tensor, t: torch.Tensor, y: torch.Tensor, guidance_scale: float) -> torch.Tensor:
+	def _predict_eps_with_cfg(self, x_t: torch.Tensor, t: torch.Tensor, y: Optional[torch.Tensor], guidance_scale: float) -> torch.Tensor:
+		if not self.class_conditional:
+			# CFG only makes sense with conditional and unconditional branches.
+			return self.predict_noise(x_t, t, y=None, class_drop_prob=0.0)
+
 		if guidance_scale <= 1.0:
 			return self.predict_noise(x_t, t, y=y, class_drop_prob=0.0)
 
@@ -277,7 +287,9 @@ class DiffusionModel(nn.Module):
 		sampling_steps = max(1, min(sampling_steps, self.num_diffusion_steps))
 
 		x = torch.randn(num_samples, self.img_channels, self.image_size, self.image_size, device=device)
-		if labels is None:
+		if not self.class_conditional:
+			labels = None
+		elif labels is None:
 			labels = torch.randint(0, self.num_classes, (num_samples,), device=device)
 
 		if use_ddim:

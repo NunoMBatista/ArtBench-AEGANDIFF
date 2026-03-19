@@ -17,6 +17,7 @@ def _get_pickle_value(obj, key):
 
 
 def _resolve_kaggle_paths(kaggle_root):
+	# Expected structure follows Kaggle's ArtBench-10 dump layout.
 	root = Path(kaggle_root)
 	csv_path = root / "ArtBench-10.csv"
 	batch_dir = root / "artbench-10-python" / "artbench-10-batches-py"
@@ -31,6 +32,7 @@ def _load_kaggle_batches(batch_dir):
 		labels = np.asarray(_get_pickle_value(batch, "labels"), dtype=np.int64)
 		if data.ndim != 2 or data.shape[1] != 3072:
 			raise ValueError(f"Unexpected data shape in {path}: {data.shape}")
+		# Stored format is flat CIFAR-like vectors; reshape into HWC RGB images.
 		images = data.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
 		return images, labels
 
@@ -75,6 +77,7 @@ def load_kaggle_artbench10(kaggle_root):
 
 
 def _read_subset_csv_indices(csv_path):
+	# Accept both naming conventions used in provided subset CSVs.
 	indices = []
 	with open(csv_path, "r", encoding="utf-8", newline="") as f:
 		reader = csv.DictReader(f)
@@ -100,6 +103,7 @@ def _read_subset_csv_indices(csv_path):
 
 
 def _apply_subset(images, labels, subset_indices):
+	# Subset is applied only to train split; test split remains untouched.
 	subset_indices = np.asarray(subset_indices, dtype=np.int64)
 	if subset_indices.min() < 0 or subset_indices.max() >= images.shape[0]:
 		raise ValueError("Subset indices out of bounds for train split")
@@ -120,6 +124,7 @@ class ArtBenchKaggleDataset(Dataset):
 		if image.ndim != 3 or image.shape[-1] != 3:
 			raise ValueError(f"Expected HxWx3 image, got {image.shape}")
 		image = torch.from_numpy(image).permute(2, 0, 1).contiguous()
+		# Normalize to [-1, 1] to match the generators' tanh output range.
 		image = image.float().div(255.0)
 		image = image.mul(2.0).sub(1.0)
 		return image, label
@@ -136,6 +141,7 @@ def get_dataloaders(
 	kaggle_root="ArtBench-10",
 	shuffle_train=True,
 ):
+	# Load raw train/test splits once, then optionally filter train data.
 	train_images, train_labels, test_images, test_labels, class_names = load_kaggle_artbench10(
 		kaggle_root
 	)

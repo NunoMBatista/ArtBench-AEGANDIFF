@@ -33,6 +33,7 @@ StepFn = Callable[[torch.nn.Module, Batch, torch.device, bool], Tuple[torch.Tens
 
 
 def load_config(path: str) -> Dict:
+    # Centralized YAML loading keeps all experiment controls in config files.
     with open(path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
     if not isinstance(config, dict):
@@ -168,6 +169,7 @@ def train_loop(
 
 
 def _init_wandb(config: Dict, model_type: str, run_dir: str):
+    # W&B integration is optional and should never block local training.
     wandb_cfg = config.get("wandb", {}) or {}
     if not wandb_cfg.get("enabled", False):
         return None
@@ -194,6 +196,7 @@ def _init_wandb(config: Dict, model_type: str, run_dir: str):
 
 
 def _make_run_dir(prefix: str = "run_model") -> str:
+    # Every run writes to a timestamped folder for reproducibility and easy comparison.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = os.path.join("outputs", f"{prefix}_{timestamp}")
     os.makedirs(run_dir, exist_ok=True)
@@ -201,6 +204,7 @@ def _make_run_dir(prefix: str = "run_model") -> str:
 
 
 def _save_history_plot(history, run_dir: str):
+    # Plot only train/val loss curves because these are available for all model families.
     epochs = [h["epoch"] for h in history]
     train_loss = [h.get("train_loss", 0.0) for h in history]
     val_loss = [h.get("val_loss", 0.0) for h in history]
@@ -218,6 +222,7 @@ def _save_history_plot(history, run_dir: str):
 
 
 def _save_sample_grid(model, device: torch.device, run_dir: str, num_samples: int = 64):
+    # Save a quick qualitative snapshot in image space [0, 1].
     model.eval()
     with torch.no_grad():
         if hasattr(model, "sample"):
@@ -282,6 +287,7 @@ def _compute_fid_kid_metrics(
 
 
 def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
+    # Single factory entrypoint so new model families plug into the same train loop.
     model_type = config["model_type"].lower()
     latent_dim = config.get("latent_dim", 128)
     base_channels = config.get("base_channels", 64)
@@ -305,6 +311,7 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             cfg_dropout=config.get("cfg_dropout", 0.1),
             sample_steps=config.get("sample_steps", 100),
             guidance_scale=config.get("guidance_scale", 2.0),
+            class_conditional=config.get("class_conditional", True),
             use_attention=config.get("use_attention", False),
         ).to(device)
     else:
@@ -312,6 +319,7 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
 
 
 def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]]:
+    # Optimizer selection is model-aware because GANs need separate G/D optimizers.
     model_type = config["model_type"].lower()
     optim_cfg = config.get("optimizer", {"name": "adam"})
     lr = config["lr"]
@@ -369,6 +377,7 @@ def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Opt
 
 
 def get_step_fn(config: Dict) -> Callable:
+    # A step function encapsulates per-model forward/loss behavior behind one interface.
     model_type = config["model_type"].lower()
     
     if model_type == "vae":
@@ -435,11 +444,13 @@ def get_step_fn(config: Dict) -> Callable:
         return step_fn
 
     elif model_type == "diffusion":
+        class_conditional = bool(config.get("class_conditional", True))
+
         def step_fn(model, batch, device, train):
             images, labels = batch
 
             # Diffusion loss is MSE between true and predicted noise at random timesteps.
-            loss = model(images, labels)
+            loss = model(images, labels if class_conditional else None)
             return loss, {"noise_mse": float(loss.item())}
         return step_fn
     
@@ -485,6 +496,7 @@ def main():
         if wandb_run is not None:
             wandb_run.log(log, step=log["epoch"])
 
+    # Optional periodic evaluation during training for trend tracking.
     fid_kid_every_epochs = int(config.get("fid_kid_every_epochs", 0))
     fid_kid_num_samples = int(config.get("fid_kid_num_samples", config.get("eval_num_samples", 5000)))
     fid_kid_metrics_batch_size = int(
@@ -500,6 +512,7 @@ def main():
     def _epoch_eval_fn(epoch: int) -> Dict[str, float]:
         if fid_kid_every_epochs <= 0 or (epoch % fid_kid_every_epochs != 0):
             return {}
+        # Reuse the same batched evaluator used at end-of-run to avoid OOM drift.
         return _compute_fid_kid_metrics(
             model=model,
             train_loader=train_loader,
@@ -537,6 +550,7 @@ def main():
         gen_batch_size=int(config.get("eval_gen_batch_size", config["batch_size"])),
     )
 
+    # Persist run artifacts for offline analysis and reproducibility.
     with open(os.path.join(run_dir, "metrics.yml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(metrics, f, sort_keys=False)
 

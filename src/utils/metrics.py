@@ -25,8 +25,10 @@ def _to_torch_images(images: np.ndarray) -> torch.Tensor:
     # Ensure the tensor is float and normalized to [0, 1]
     if tensor.dtype != torch.float32:
         tensor = tensor.float()
+    # Many training pipelines store images in [-1, 1]; convert back to [0, 1] for torchmetrics.
     if tensor.min() < 0.0:
         tensor = tensor.add(1.0).div(2.0)
+    # Handle raw uint8-like arrays if present.
     if tensor.max() > 1.0:
         tensor = tensor / 255.0
     return tensor
@@ -44,7 +46,7 @@ def compute_fid_kid(
             f"DIFFERENT REAL/FAKE SHAPES :/ {real_images.shape} vs {fake_images.shape}"
         )
 
-    # Get device, as usual
+    # Metrics run on selected device, while arrays stay on CPU until batch transfer.
     dev = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Convert real and fake images to torch tensors (keep on CPU, move per batch)
