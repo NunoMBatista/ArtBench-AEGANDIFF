@@ -1,0 +1,104 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+
+\begin{document}
+
+\title{ArtBench-10 Generative Modeling: VAE, DCGAN, and Diffusion}
+\author{Nuno Batista \and Miguel Cabral Pinto}
+\institute{University of Coimbra}
+\maketitle
+
+\begin{abstract}
+This report presents the design, training, and evaluation of three generative
+model families on ArtBench-10: a VAE, a DCGAN, and diffusion-based models. As well as some variants of the diffusion model and the GAN, including a pretrained Google DDPM fine-tuning approach. We detail our data pipeline, model architectures, training protocols, and evaluation metrics (FID/KID).
+We compare model behavior on the provided 20\% subset, select the strongest
+approach, and discuss expected full-dataset retraining.
+
+\end{abstract}
+
+\section{Introduction}
+% Motivation for generative modeling in artistic domains.
+% Project scope and expected contributions.
+
+
+\section{Problem Description}
+% ArtBench-10 characteristics (32x32 RGB, 10 styles, 50k train).
+% Why this is a generation task and not classification.
+% Main challenges: fidelity, diversity, style consistency, stability.
+
+\section{Methodology and Approach}
+
+\subsection{Data Pipeline}
+% Data source and folder structure used in the repository.
+% Normalization, batching, subset protocol (20% CSV subset).
+% Full-data retraining plan.
+
+\subsection{Model Families}
+
+\subsubsection{VAE}
+% Architecture summary, latent dimension, beta, reconstruction objective.
+
+\subsubsection{DCGAN}
+% Generator/discriminator design, spectral norm usage, adversarial objective.
+
+\subsubsection{Diffusion (From Scratch)}
+% UNet design, noise schedule, training objective, sampling strategy.
+
+\subsubsection{Diffusion (Pretrained Google DDPM Fine-Tuning)}
+% Pretrained checkpoint and rationale.
+% Freezing strategy (down/mid frozen, up trainable).
+% Low learning rate and scheduler locking.
+% Unconditional setup and observed metric/perception trade-offs.
+
+\subsection{Implementation and Reproducibility}
+% Config-driven experiments (YAML), random seeds, checkpointing.
+% W\&B logging policy and artifact tracking.
+% Hardware/software setup.
+
+\section{Experimental Setup}
+
+\subsection{Training Protocol}
+% Hyperparameter tables per model.
+% Number of epochs, optimizer settings, batch size.
+
+\subsection{Evaluation Protocol}
+% Mandatory protocol from statement:
+% - 5000 generated samples
+% - 5000 real samples
+% - FID on full sets
+% - KID with 50 subsets of size 100
+% - 10 repetitions with different seeds
+% Report mean +- std for FID/KID.
+
+\section{Results and Analysis}
+
+\subsection{Qualitative Results}
+% Include sample grids for each model family.
+% Comment on fidelity/diversity/style coherence.
+
+\subsection{Quantitative Results}
+% Table: FID mean +- std, KID mean +- std (all required runs).
+% Keep evaluation code path fixed across models.
+
+\subsection{Ablations and Discussion}
+% Explain major design choices and observed effects.
+% Example: pretrained diffusion visual quality vs FID/KID behavior.
+% Example: flat diffusion noise-MSE during fine-tuning.
+
+\section{Conclusion}
+% Final comparison summary.
+% Best model on subset and rationale.
+% Full-data retraining status/final outcome.
+% Limitations and short future work notes.
+
+\section*{Use of External Resources and AI Tools}
+% List external repositories, pretrained components, and AI assistants used.
+% Describe how each was used and how outputs were validated.
+
+\begin{thebibliography}{10}
+% Add project references here (ArtBench, VAE, DCGAN, DDPM, evaluation metrics, etc.).
+\end{thebibliography}
+
+\end{document}
