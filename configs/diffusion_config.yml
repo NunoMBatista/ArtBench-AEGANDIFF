@@ -22,10 +22,10 @@ cfg_dropout: 0.1 # Class dropout probability for classifier-free guidance.
 sample_steps: 100 # DDIM steps used by model.sample().
 guidance_scale: 2.0
 class_conditional: false # If false, ignores labels and learns the full mixed-class distribution p(x).
-use_attention: false # Enable one bottleneck self-attention block in the UNet.
+use_attention: true # Enable one bottleneck self-attention block in the UNet.
 
 # Training
-epochs: 50
+epochs: 40
 lr: 0.0002
 run_prefix: "run_diffusion"
 checkpoint_every_epochs: 5 # Save model_epoch_XXX.pt every N epochs (0 disables).
