@@ -1,0 +1,12 @@
+wandb_version: 1
+
+base_channels:
+  value: 64
+batch_size:
+  value: 256
+beta:
+  value: 0.5
+latent_dim:
+  value: 64
+lr:
+  value: 8.591752253879354e-05

@@ -21,6 +21,7 @@ load_dotenv()
 
 from src.models.VAE import VAE
 from src.models.DCGAN import DCGAN
+from src.models.cGAN import cGAN
 from src.models.diffusion import DiffusionModel
 from src.models.google_DDPM import GoogleDDPMFineTuner
 from src.utils.data_loader import get_dataloaders
@@ -213,6 +214,7 @@ def _find_latest_checkpoint(model_type: str) -> str:
 _MODEL_REGISTRY: Dict[str, type] = {
     "vae": VAE,
     "dcgan": DCGAN,
+    "cgan": cGAN,
     "diffusion": DiffusionModel,
     "google_ddpm": GoogleDDPMFineTuner,
 }
@@ -295,6 +297,9 @@ def main():
 
     extra_kwargs = {}
     if model_type == "dcgan":
+        extra_kwargs["use_spectral_norm"] = config.use_spectral_norm
+    elif model_type == "cgan":
+        extra_kwargs["num_classes"] = config.num_classes
         extra_kwargs["use_spectral_norm"] = config.use_spectral_norm
     elif model_type == "diffusion":
         extra_kwargs.update(

@@ -22,6 +22,7 @@ load_dotenv()
 
 from src.models.VAE import VAE, vae_loss
 from src.models.DCGAN import DCGAN, dcgan_loss
+from src.models.cGAN import cGAN, cgan_loss
 from src.models.diffusion import DiffusionModel
 from src.models.google_DDPM import GoogleDDPMFineTuner
 from src.utils.data_loader import get_dataloaders
@@ -190,6 +191,20 @@ def _init_wandb(config: Dict, model_type: str, run_dir: str):
             tags=wandb_cfg.get("tags", [model_type]),
             notes=wandb_cfg.get("notes", ""),
         )
+        # When running inside a sweep, wandb.config contains the agent's
+        # chosen hyperparameters.  Merge them back into the local config
+        # dict so every downstream consumer (model, optimizer, etc.) picks
+        # up the sweep values automatically.
+        for key, value in dict(wandb.config).items():
+            if key in config:
+                config[key] = value
+            elif "." in key:
+                # Support nested keys like "optimizer.betas"
+                parts = key.split(".")
+                d = config
+                for part in parts[:-1]:
+                    d = d.setdefault(part, {})
+                d[parts[-1]] = value
         return run
     except Exception as e:
         print(f"WARNING: failed to initialize wandb ({e}). Continuing without wandb.")
@@ -301,6 +316,14 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             base_channels=base_channels,
             use_spectral_norm=config.get("use_spectral_norm", False)
         ).to(device)
+    elif model_type == "cgan":
+        return cGAN(
+            latent_dim=latent_dim,
+            num_classes=config.get("num_classes", 10),
+            embed_dim=config.get("embed_dim", 64),
+            base_channels=base_channels,
+            use_spectral_norm=config.get("use_spectral_norm", False),
+        ).to(device)
     elif model_type == "diffusion":
         return DiffusionModel(
             latent_dim=latent_dim,
@@ -346,11 +369,11 @@ def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Opt
             )
         raise ValueError(f"Unsupported optimizer for VAE: {optim_cfg['name']}")
 
-    elif model_type == "dcgan":
+    elif model_type in ("dcgan", "cgan"):
         # GANs usually need specific betas for stability
         g_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
         d_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
-        
+
         opt_g = torch.optim.Adam(
             model.generator.parameters(),
             lr=lr,
@@ -470,6 +493,60 @@ def get_step_fn(config: Dict) -> Callable:
                     errG = dcgan_loss(output_fake, torch.full((batch_size,), real_label, device=device))
                     errD = dcgan_loss(output_real, torch.full((batch_size,), real_label, device=device)) + \
                            dcgan_loss(output_fake, torch.full((batch_size,), fake_label, device=device))
+                return errG, {"errD": errD.item(), "errG": errG.item()}
+        return step_fn
+
+    elif model_type == "cgan":
+        def step_fn(model, batch, optimizers, device, train, d_updates_per_g=1):
+            images, labels = batch
+            batch_size = images.size(0)
+            real_label = 1.0
+            fake_label = 0.0
+
+            opt_g = optimizers["opt_g"]
+            opt_d = optimizers["opt_d"]
+
+            if train:
+                total_d_loss = 0
+                for _ in range(d_updates_per_g):
+                    opt_d.zero_grad()
+                    label_real = torch.full((batch_size,), real_label, device=device)
+                    output_real = model.discriminator(images, labels)
+                    errD_real = cgan_loss(output_real, label_real)
+
+                    noise = torch.randn(batch_size, model.latent_dim, device=device)
+                    fake = model.generator(noise, labels)
+                    label_fake = torch.full((batch_size,), fake_label, device=device)
+                    output_fake = model.discriminator(fake.detach(), labels)
+                    errD_fake = cgan_loss(output_fake, label_fake)
+
+                    errD = errD_real + errD_fake
+                    errD.backward()
+                    opt_d.step()
+                    total_d_loss += errD.item()
+
+                opt_g.zero_grad()
+                label_g = torch.full((batch_size,), real_label, device=device)
+                output_g = model.discriminator(fake, labels)
+                errG = cgan_loss(output_g, label_g)
+                errG.backward()
+                opt_g.step()
+
+                metrics = {
+                    "errD": total_d_loss / d_updates_per_g,
+                    "errG": errG.item(),
+                    "D_x": output_g.mean().item(),
+                }
+                return errG, metrics
+            else:
+                with torch.no_grad():
+                    noise = torch.randn(batch_size, model.latent_dim, device=device)
+                    fake = model.generator(noise, labels)
+                    output_fake = model.discriminator(fake, labels)
+                    output_real = model.discriminator(images, labels)
+                    errG = cgan_loss(output_fake, torch.full((batch_size,), real_label, device=device))
+                    errD = cgan_loss(output_real, torch.full((batch_size,), real_label, device=device)) + \
+                           cgan_loss(output_fake, torch.full((batch_size,), fake_label, device=device))
                 return errG, {"errD": errD.item(), "errG": errG.item()}
         return step_fn
 

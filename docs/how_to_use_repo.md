@@ -17,7 +17,7 @@
 ```bash
 python src/train.py configs/dcgan_config.yml --checkpoint outputs/run_dcgan_20260317/model.pt
 ```
-**Note:** ```--checkpoint``` paramter is optional
+**Note:** ```--checkpoint``` parameter is optional
 
 - Outputs are written to `outputs/run_<model>_<timestamp>/`.
 

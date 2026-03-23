@@ -11,26 +11,26 @@ subset_csv_path: "provided/training_20_percent.csv"
 subset_seed: 67
 
 # Model
-model_type: "dcgan"
+model_type: "cgan"
 latent_dim: 100
 base_channels: 64
-use_spectral_norm: true # Constrains D's Lipschitz constant for better stability
+num_classes: 10
+embed_dim: 64
+use_spectral_norm: true
 
 # Training
 epochs: 20
-lr: 0.0002 # Recommended learning rate for GANs (Radford et al.)
-beta: 1.0 # Not used for DCGAN but kept for compatibility
-run_prefix: "run_dcgan"
+lr: 0.0002
+run_prefix: "run_cgan"
 
 # Optimizer (Adam)
 optimizer:
   name: "adam"
-  # beta1=0.0 for stability with Spectral Norm (or 0.5 for standard DCGAN)
-  betas: [0.0, 0.999] 
+  betas: [0.0, 0.999]
   weight_decay: 0.0
 
 # GAN specific training params
-d_updates_per_g: 1 # 1:1 is standard, but 2:1 or 5:1 can help if D is too weak
+d_updates_per_g: 1
 
 # Evaluation
 eval_num_samples: 5000
@@ -41,5 +41,4 @@ wandb:
   enabled: true
   entity: "nunombatista-university-of-coimbra"
   project: "ArtBench-AEGANDIFF"
-  # run_name: "diffusion-run"
-  tags: ["dcgan", "artbench"]
+  tags: ["cgan", "artbench"]
