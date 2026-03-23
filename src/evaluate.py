@@ -57,6 +57,7 @@ class EvalConfig:
     class_conditional: bool = True
     use_attention: bool = False
     pretrained_model_id: str = "google/ddpm-cifar10-32"
+    disable_attention_on_cpu: bool = True
     wandb: Dict[str, Any] = field(default_factory=lambda: {"enabled": False})
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -79,6 +80,7 @@ class EvalConfig:
         self.class_conditional = train_cfg.get("class_conditional", self.class_conditional)
         self.use_attention = train_cfg.get("use_attention", self.use_attention)
         self.pretrained_model_id = train_cfg.get("pretrained_model_id", self.pretrained_model_id)
+        self.disable_attention_on_cpu = train_cfg.get("disable_attention_on_cpu", self.disable_attention_on_cpu)
         self.run_prefix = train_cfg.get("run_prefix", self.run_prefix)
         self.use_subset = train_cfg.get("use_subset", self.use_subset)
         self.subset_mode = train_cfg.get("subset_mode", self.subset_mode)
@@ -314,6 +316,7 @@ def main():
                 "pretrained_model_id": config.pretrained_model_id,
                 "num_diffusion_steps": config.num_diffusion_steps,
                 "sample_steps": config.sample_steps,
+                "disable_attention_on_cpu": config.disable_attention_on_cpu,
             }
         )
 

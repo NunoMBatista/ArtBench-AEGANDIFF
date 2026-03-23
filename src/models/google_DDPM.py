@@ -7,6 +7,13 @@ from diffusers.models.unets.unet_2d import UNet2DModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 
+class _IdentityWithKwargs(nn.Module):
+	"""Drop-in replacement for Attention blocks that accept extra kwargs."""
+
+	def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+		return x
+
+
 class GoogleDDPMFineTuner(nn.Module):
 	"""Fine-tuning wrapper for `google/ddpm-cifar10-32`.
 
@@ -22,6 +29,7 @@ class GoogleDDPMFineTuner(nn.Module):
 		pretrained_model_id: str = "google/ddpm-cifar10-32",
 		num_diffusion_steps: int = 1000,
 		sample_steps: int = 100,
+		disable_attention_on_cpu: bool = True,
 		**_unused,
 	):
 		super().__init__()
@@ -30,6 +38,7 @@ class GoogleDDPMFineTuner(nn.Module):
 
 		self.pretrained_model_id = pretrained_model_id
 		self.sample_steps = int(sample_steps)
+		self.disable_attention_on_cpu = bool(disable_attention_on_cpu)
 
 		# Some Hub repos store components at root, others under subfolders.
 		# Try both layouts so this wrapper works across diffusers packaging styles.
@@ -52,6 +61,11 @@ class GoogleDDPMFineTuner(nn.Module):
 			)
 		self.num_diffusion_steps = scheduler_steps
 
+		# CPU fallback: some environments segfault in attention backward for this
+		# checkpoint. Replacing attention blocks with identity keeps training alive.
+		if self.disable_attention_on_cpu:
+			self._replace_attention_with_identity()
+
 		# Partial fine-tuning: freeze encoder + bottleneck; adapt only decoder.
 		self._freeze_all_then_enable_up_blocks()
 
@@ -61,6 +75,17 @@ class GoogleDDPMFineTuner(nn.Module):
 
 		for p in self.unet.up_blocks.parameters():
 			p.requires_grad = True
+
+	def _replace_attention_with_identity(self) -> None:
+		for name, module in list(self.unet.named_modules()):
+			if type(module).__name__ != "Attention":
+				continue
+
+			parent_name, child_name = name.rsplit(".", 1)
+			parent = self.unet
+			for part in parent_name.split("."):
+				parent = getattr(parent, part)
+			setattr(parent, child_name, _IdentityWithKwargs())
 
 	@staticmethod
 	def _load_unet(model_id: str) -> UNet2DModel:

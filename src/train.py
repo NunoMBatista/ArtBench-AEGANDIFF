@@ -322,6 +322,7 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             pretrained_model_id=config.get("pretrained_model_id", "google/ddpm-cifar10-32"),
             num_diffusion_steps=config.get("num_diffusion_steps", 1000),
             sample_steps=config.get("sample_steps", 100),
+            disable_attention_on_cpu=config.get("disable_attention_on_cpu", device.type == "cpu"),
         ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
