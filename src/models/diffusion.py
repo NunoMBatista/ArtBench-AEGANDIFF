@@ -7,7 +7,12 @@ from torch.nn import functional as F
 
 
 def _sinusoidal_timestep_embedding(timesteps: torch.Tensor, dim: int) -> torch.Tensor:
-	"""Create sinusoidal embeddings for diffusion timesteps."""
+	"""Create deterministic timestep embeddings.
+
+	Using fixed sin/cos features (instead of learned lookup embeddings) lets the
+	model generalize to arbitrary timestep values and keeps the conditioning space
+	well-behaved when sampling with fewer inference steps than training steps.
+	"""
 	half_dim = dim // 2
 	if half_dim == 0:
 		return timesteps.float().unsqueeze(-1)
@@ -22,25 +27,31 @@ def _sinusoidal_timestep_embedding(timesteps: torch.Tensor, dim: int) -> torch.T
 
 
 class ResidualBlock(nn.Module):
-	"""A minimal residual block conditioned by time and class embeddings."""
+	"""Residual block with additive conditioning from time/class embedding."""
 
 	def __init__(self, in_channels: int, out_channels: int, cond_dim: int):
 		super().__init__()
 		self.in_channels = in_channels
 		self.out_channels = out_channels
 
+		# GroupNorm is batch-size agnostic and is typically more stable than
+		# BatchNorm for diffusion, where memory constraints often force small batches.
 		self.norm1 = nn.GroupNorm(8, in_channels)
 		self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
 		self.norm2 = nn.GroupNorm(8, out_channels)
 		self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
 
+		# Project condition once per sample and broadcast spatially. This keeps
+		# conditioning cheap while still modulating all feature maps.
 		self.cond_proj = nn.Linear(cond_dim, out_channels)
 		self.skip = nn.Identity() if in_channels == out_channels else nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
 	def forward(self, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
 		h = self.conv1(F.silu(self.norm1(x)))
 
-		# Broadcast conditioning to all spatial locations.
+		# Add an embedding-dependent bias to every spatial location.
+		# Impact: the block can shift denoising behavior by timestep/class without
+		# expensive cross-attention or FiLM layers.
 		cond_bias = self.cond_proj(cond).unsqueeze(-1).unsqueeze(-1)
 		h = h + cond_bias
 
@@ -49,7 +60,11 @@ class ResidualBlock(nn.Module):
 
 
 class TinyUNet(nn.Module):
-	"""Small UNet designed for 32x32 images used in ArtBench-10."""
+	"""Compact UNet for 32x32 images (ArtBench-10 scale).
+
+	Design choice: only two down/up stages. Impact: much lower compute and memory,
+	which enables faster iteration, at the cost of less capacity than deeper UNets.
+	"""
 
 	def __init__(self, in_channels: int, base_channels: int, cond_dim: int, use_attention: bool = False):
 		super().__init__()
@@ -64,6 +79,8 @@ class TinyUNet(nn.Module):
 		self.down2 = ResidualBlock(c * 2, c * 2, cond_dim)
 		self.downsample2 = nn.Conv2d(c * 2, c * 4, kernel_size=4, stride=2, padding=1)
 
+		# Attention is optional because it is the most expensive block. Keeping it
+		# at the bottleneck gives global context where spatial resolution is smallest.
 		self.mid = ResidualBlock(c * 4, c * 4, cond_dim)
 		self.mid_attn = SelfAttention2d(c * 4) if use_attention else nn.Identity()
 
@@ -88,6 +105,8 @@ class TinyUNet(nn.Module):
 		mid = self.mid(mid_in, cond)
 		mid = self.mid_attn(mid)
 
+		# Skip concatenations preserve high-frequency details lost in downsampling,
+		# which is critical for sharp image reconstruction in denoising models.
 		u1_in = self.upsample1(mid)
 		u1 = self.up1(torch.cat([u1_in, d2], dim=1), cond)
 
@@ -98,7 +117,11 @@ class TinyUNet(nn.Module):
 
 
 class SelfAttention2d(nn.Module):
-	"""Minimal self-attention block over spatial tokens."""
+	"""Self-attention over flattened spatial tokens.
+
+	This captures long-range dependencies that pure convolutions miss (for example,
+		coherence between distant regions), but increases runtime and memory.
+	"""
 
 	def __init__(self, channels: int, num_heads: int = 4):
 		super().__init__()
@@ -119,7 +142,7 @@ class SelfAttention2d(nn.Module):
 		qkv = self.qkv(x)
 		q, k, v = torch.chunk(qkv, 3, dim=1)
 
-		# Flatten spatial dims into tokens and apply multi-head scaled dot-product attention.
+		# Flatten HxW into tokens and apply MHSA in token space.
 		q = q.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
 		k = k.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
 		v = v.view(b, self.num_heads, self.head_dim, h * w).permute(0, 1, 3, 2)
@@ -136,7 +159,9 @@ class DiffusionModel(nn.Module):
 	"""
 	Minimal class-conditional DDPM with classifier-free guidance and DDIM sampling.
 
-	The model predicts noise epsilon and uses MSE training objective.
+	The model predicts noise epsilon and uses MSE training objective. Predicting
+	epsilon keeps the target distribution stationary across timesteps, which often
+	makes optimization simpler than directly predicting x0 in small models.
 	"""
 
 	def __init__(
@@ -174,7 +199,9 @@ class DiffusionModel(nn.Module):
 			nn.Linear(cond_dim, cond_dim),
 		)
 
-		# Extra class index is the null token used for classifier-free guidance.
+		# Extra class index is a learned "null" token used for unconditional branch.
+		# Impact: one model supports both conditional and unconditional predictions,
+		# enabling classifier-free guidance without training a second network.
 		self.null_class_idx = num_classes
 		self.class_emb = nn.Embedding(num_classes + 1, cond_dim)
 		self.unet = TinyUNet(
@@ -184,12 +211,16 @@ class DiffusionModel(nn.Module):
 			use_attention=self.use_attention,
 		)
 
+		# Linear beta schedule is a simple, robust default for low-resolution images.
+		# It is not always best FID-wise, but it is easy to reason about and stable.
 		betas = torch.linspace(1e-4, 2e-2, self.num_diffusion_steps, dtype=torch.float32)
 		alphas = 1.0 - betas
 		alphas_cumprod = torch.cumprod(alphas, dim=0)
 		alphas_cumprod_prev = torch.cat([torch.ones(1, dtype=torch.float32), alphas_cumprod[:-1]], dim=0)
 
-		# Precompute diffusion coefficients once and keep them on the same device as the model.
+		# Precompute coefficients once and store as buffers.
+		# Impact: avoids recomputation every step and guarantees state_dict/device
+		# compatibility without treating these constants as trainable parameters.
 		self.register_buffer("betas", betas)
 		self.register_buffer("alphas", alphas)
 		self.register_buffer("alphas_cumprod", alphas_cumprod)
@@ -221,11 +252,15 @@ class DiffusionModel(nn.Module):
 		else:
 			y_idx = y.clone()
 			if class_drop_prob > 0.0:
-				# Randomly drop class conditioning for classifier-free guidance training.
+				# Randomly replace labels with null token during training.
+				# Impact: teaches the same network both conditional and unconditional
+				# denoising, which is required for CFG at inference time.
 				drop_mask = torch.rand_like(y_idx.float()) < class_drop_prob
 				y_idx[drop_mask] = self.null_class_idx
 
 		class_emb = self.class_emb(y_idx)
+		# Sum (instead of concat) keeps condition width fixed, so UNet channel sizes
+		# remain unchanged regardless of conditioning mode.
 		return time_emb + class_emb
 
 	def predict_noise(
@@ -248,7 +283,8 @@ class DiffusionModel(nn.Module):
 
 	def p_losses(self, x_start: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
 		batch_size = x_start.size(0)
-		# Sample random timesteps so each batch trains denoising at different noise levels.
+		# Random timestep sampling gives an unbiased estimator of the full diffusion
+		# objective while keeping each optimization step cheap.
 		t = torch.randint(0, self.num_diffusion_steps, (batch_size,), device=x_start.device)
 		noise = torch.randn_like(x_start)
 		x_t = self.q_sample(x_start, t, noise)
@@ -267,7 +303,9 @@ class DiffusionModel(nn.Module):
 		if guidance_scale <= 1.0:
 			return self.predict_noise(x_t, t, y=y, class_drop_prob=0.0)
 
-		# Classifier-free guidance: combine conditional and unconditional predictions.
+		# CFG extrapolates away from unconditional prediction toward conditional one.
+		# Impact: higher guidance usually improves class faithfulness but can reduce
+		# diversity and introduce oversaturated artifacts when too large.
 		eps_cond = self.predict_noise(x_t, t, y=y, class_drop_prob=0.0)
 		eps_uncond = self.predict_noise(x_t, t, y=None, class_drop_prob=0.0)
 		return eps_uncond + guidance_scale * (eps_cond - eps_uncond)
@@ -293,7 +331,8 @@ class DiffusionModel(nn.Module):
 			labels = torch.randint(0, self.num_classes, (num_samples,), device=device)
 
 		if use_ddim:
-			# Uniformly subsample timesteps for faster deterministic DDIM inference.
+			# Uniform timestep subsampling: fewer model calls, so much faster sampling.
+			# Tradeoff: aggressive subsampling can lose detail/fidelity.
 			step_indices = torch.linspace(
 				self.num_diffusion_steps - 1,
 				0,
@@ -307,7 +346,7 @@ class DiffusionModel(nn.Module):
 			t = torch.full((num_samples,), int(t_scalar.item()), device=device, dtype=torch.long)
 			eps = self._predict_eps_with_cfg(x, t, labels, guidance)
 
-			# Reconstruct x_0 estimate from current x_t and predicted noise.
+			# Reconstruct x0 from xt and predicted noise (standard epsilon parameterization).
 			alpha_bar_t = self._gather(self.alphas_cumprod, t, x.shape)
 			sqrt_alpha_bar_t = torch.sqrt(alpha_bar_t)
 			sqrt_one_minus_alpha_bar_t = torch.sqrt(1.0 - alpha_bar_t)
@@ -320,10 +359,12 @@ class DiffusionModel(nn.Module):
 					next_t = torch.full((num_samples,), int(step_indices[i + 1].item()), device=device, dtype=torch.long)
 					alpha_bar_next = self._gather(self.alphas_cumprod, next_t, x.shape)
 
-				# Deterministic DDIM update (eta=0) for fast and stable sampling.
+				# Deterministic DDIM update (eta=0): repeatable outputs for a fixed seed.
+				# This is useful for debugging and comparisons across model changes.
 				x = torch.sqrt(alpha_bar_next) * x0_pred + torch.sqrt(1.0 - alpha_bar_next) * eps
 			else:
-				# Ancestral DDPM step adds stochasticity through posterior variance noise.
+				# Ancestral DDPM update injects fresh noise each step.
+				# Impact: typically more diverse samples, but slower and less deterministic.
 				alpha_t = self._gather(self.alphas, t, x.shape)
 				beta_t = self._gather(self.betas, t, x.shape)
 				sqrt_recip_alpha_t = self._gather(self.sqrt_recip_alphas, t, x.shape)
