@@ -1,5 +1,5 @@
 seed: 67
-device: "cpu"
+device: "cuda"
 
 # Dataset
 kaggle_root: "data"
@@ -17,7 +17,7 @@ base_channels: 128 # Kept for compatibility with shared model factory.
 pretrained_model_id: "google/ddpm-cifar10-32"
 num_diffusion_steps: 1000 # Must match pretrained scheduler exactly.
 sample_steps: 100
-disable_attention_on_cpu: true # Avoid known CPU backward crashes in attention blocks.
+disable_attention_on_cpu: false # Avoid known CPU backward crashes in attention blocks.
 
 # Training
 epochs: 40
