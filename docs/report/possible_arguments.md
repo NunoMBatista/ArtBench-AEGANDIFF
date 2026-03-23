@@ -10,3 +10,14 @@
 - KL term goes near zero, so the decoder learns to reconstruct without using z.
 - Possible Mitigations: KL warm-up/annealing, lower beta, increase model capacity.
 - Obviously, if we change the beta to something different than 1, this would technically be a beta-VAE.
+
+## Google DDPM Fine-Tuning (google/ddpm-cifar10-32)
+
+- Freeze encoder + bottleneck (`down_blocks` and `mid_block`), train only decoder (`up_blocks`).
+	Reason: preserve pretrained low-level structure priors and adapt mainly style/texture decoding.
+- Use a low learning rate (`1e-5` or `5e-6`).
+	Reason: reduces catastrophic forgetting of pretrained diffusion weights.
+- Keep scheduler identical to pretrained checkpoint (`linear`, `1000` timesteps).
+	Reason: UNet weights are coupled to the training noise schedule; changing it during fine-tune can destabilize training.
+- Train unconditionally (ignore class labels).
+	Reason: the pretrained model is unconditional, and this gives a fair comparison against the repo's unconditional diffusion baseline.

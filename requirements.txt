@@ -8,3 +8,7 @@ tqdm
 kaggle
 wandb
 python-dotenv
+diffusers
+accelerate
+huggingface_hub
+safetensors

@@ -23,6 +23,7 @@ load_dotenv()
 from src.models.VAE import VAE, vae_loss
 from src.models.DCGAN import DCGAN, dcgan_loss
 from src.models.diffusion import DiffusionModel
+from src.models.google_DDPM import GoogleDDPMFineTuner
 from src.utils.data_loader import get_dataloaders
 from src.utils.metrics import compute_fid_kid
 from src.utils.seed_setter import set_global_seed
@@ -314,6 +315,14 @@ def get_model(config: Dict, device: torch.device) -> torch.nn.Module:
             class_conditional=config.get("class_conditional", True),
             use_attention=config.get("use_attention", False),
         ).to(device)
+    elif model_type == "google_ddpm":
+        return GoogleDDPMFineTuner(
+            latent_dim=latent_dim,
+            base_channels=base_channels,
+            pretrained_model_id=config.get("pretrained_model_id", "google/ddpm-cifar10-32"),
+            num_diffusion_steps=config.get("num_diffusion_steps", 1000),
+            sample_steps=config.get("sample_steps", 100),
+        ).to(device)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
@@ -372,6 +381,26 @@ def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Opt
                 weight_decay=weight_decay,
             )
         raise ValueError(f"Unsupported optimizer for diffusion: {optim_cfg['name']}")
+
+    elif model_type == "google_ddpm":
+        # Fine-tune only explicitly trainable layers from the HF UNet wrapper.
+        params = [p for p in model.parameters() if p.requires_grad]
+        opt_name = optim_cfg.get("name", "adamw").lower()
+        if opt_name == "adamw":
+            return torch.optim.AdamW(
+                params,
+                lr=lr,
+                betas=betas,
+                weight_decay=weight_decay,
+            )
+        if opt_name == "adam":
+            return torch.optim.Adam(
+                params,
+                lr=lr,
+                betas=betas,
+                weight_decay=weight_decay,
+            )
+        raise ValueError(f"Unsupported optimizer for google_ddpm: {optim_cfg['name']}")
     
     raise ValueError(f"Unsupported model_type for optimization: {model_type}")
 
@@ -451,6 +480,14 @@ def get_step_fn(config: Dict) -> Callable:
 
             # Diffusion loss is MSE between true and predicted noise at random timesteps.
             loss = model(images, labels if class_conditional else None)
+            return loss, {"noise_mse": float(loss.item())}
+        return step_fn
+
+    elif model_type == "google_ddpm":
+        def step_fn(model, batch, device, train):
+            images, _labels = batch
+            # Unconditional fine-tuning by design for google/ddpm-cifar10-32.
+            loss = model(images, y=None)
             return loss, {"noise_mse": float(loss.item())}
         return step_fn
     

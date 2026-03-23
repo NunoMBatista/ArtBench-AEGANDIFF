@@ -1,0 +1,49 @@
+seed: 67
+device: "cpu"
+
+# Dataset
+kaggle_root: "data"
+batch_size: 32
+num_workers: 2
+use_subset: true
+subset_mode: "csv"
+subset_csv_path: "provided/training_20_percent.csv"
+subset_seed: 67
+
+# Model
+model_type: "google_ddpm"
+latent_dim: 128 # Kept for compatibility with shared model factory.
+base_channels: 128 # Kept for compatibility with shared model factory.
+pretrained_model_id: "google/ddpm-cifar10-32"
+num_diffusion_steps: 1000 # Must match pretrained scheduler exactly.
+sample_steps: 100
+
+# Training
+epochs: 40
+lr: 0.00001 # Low LR to avoid catastrophic forgetting on pretrained weights.
+run_prefix: "run_google_ddpm"
+checkpoint_every_epochs: 5
+
+# Optimizer
+optimizer:
+  name: "adamw"
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+# Evaluation
+eval_num_samples: 5000
+eval_metrics_batch_size: 32
+eval_gen_batch_size: 32
+
+# Optional periodic FID/KID during training (0 disables)
+fid_kid_every_epochs: 4
+fid_kid_num_samples: 1000
+fid_kid_metrics_batch_size: 32
+fid_kid_gen_batch_size: 32
+
+# Weights & Biases
+wandb:
+  enabled: true
+  entity: "nunombatista-university-of-coimbra"
+  project: "ArtBench-AEGANDIFF"
+  tags: ["google_ddpm", "artbench", "finetune"]

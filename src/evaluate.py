@@ -22,6 +22,7 @@ load_dotenv()
 from src.models.VAE import VAE
 from src.models.DCGAN import DCGAN
 from src.models.diffusion import DiffusionModel
+from src.models.google_DDPM import GoogleDDPMFineTuner
 from src.utils.data_loader import get_dataloaders
 from src.utils.metrics import compute_fid_kid
 from src.utils.seed_setter import set_global_seed
@@ -55,6 +56,7 @@ class EvalConfig:
     guidance_scale: float = 2.0
     class_conditional: bool = True
     use_attention: bool = False
+    pretrained_model_id: str = "google/ddpm-cifar10-32"
     wandb: Dict[str, Any] = field(default_factory=lambda: {"enabled": False})
     run_prefix: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -76,6 +78,7 @@ class EvalConfig:
         self.guidance_scale = train_cfg.get("guidance_scale", self.guidance_scale)
         self.class_conditional = train_cfg.get("class_conditional", self.class_conditional)
         self.use_attention = train_cfg.get("use_attention", self.use_attention)
+        self.pretrained_model_id = train_cfg.get("pretrained_model_id", self.pretrained_model_id)
         self.run_prefix = train_cfg.get("run_prefix", self.run_prefix)
         self.use_subset = train_cfg.get("use_subset", self.use_subset)
         self.subset_mode = train_cfg.get("subset_mode", self.subset_mode)
@@ -209,6 +212,7 @@ _MODEL_REGISTRY: Dict[str, type] = {
     "vae": VAE,
     "dcgan": DCGAN,
     "diffusion": DiffusionModel,
+    "google_ddpm": GoogleDDPMFineTuner,
 }
 
 
@@ -302,6 +306,14 @@ def main():
                 "guidance_scale": config.guidance_scale,
                 "class_conditional": config.class_conditional,
                 "use_attention": config.use_attention,
+            }
+        )
+    elif model_type == "google_ddpm":
+        extra_kwargs.update(
+            {
+                "pretrained_model_id": config.pretrained_model_id,
+                "num_diffusion_steps": config.num_diffusion_steps,
+                "sample_steps": config.sample_steps,
             }
         )
 
