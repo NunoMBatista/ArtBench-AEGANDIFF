@@ -21,3 +21,14 @@
 	Reason: UNet weights are coupled to the training noise schedule; changing it during fine-tune can destabilize training.
 - Train unconditionally (ignore class labels).
 	Reason: the pretrained model is unconditional, and this gives a fair comparison against the repo's unconditional diffusion baseline.
+
+#### Observed Behavior During Fine-Tune
+
+- Better perceived shapes can still get worse FID/KID at 32x32.
+	Reason: Inception-based metrics at this resolution over-weight local texture and color statistics versus global semantic structure.
+- From-scratch diffusion can score better while looking less meaningful.
+	Reason: it can match ArtBench low-level texture statistics closely, which metrics reward, even when samples are mostly texture-like.
+- Fine-tuned pretrained diffusion may keep CIFAR-like structural priors with ArtBench style.
+	Reason: this hybrid distribution can be visually better for humans but statistically farther from ArtBench under Inception features.
+- Nearly flat diffusion loss does not imply no learning.
+	Reason: diffusion loss is noise-prediction MSE, not a direct quality metric; a pretrained denoiser can start near a low-loss regime and then make small stylistic updates.
