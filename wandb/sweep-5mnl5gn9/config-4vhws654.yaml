@@ -3,10 +3,10 @@ wandb_version: 1
 base_channels:
   value: 64
 batch_size:
-  value: 128
+  value: 256
 beta:
-  value: 2
+  value: 0.5
 latent_dim:
-  value: 64
+  value: 128
 lr:
-  value: 0.00022445520679608764
+  value: 5.0e-05

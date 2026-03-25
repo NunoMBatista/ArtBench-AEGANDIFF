@@ -5,8 +5,8 @@ base_channels:
 batch_size:
   value: 256
 beta:
-  value: 0.001
+  value: 0.5
 latent_dim:
-  value: 64
+  value: 128
 lr:
-  value: 8.591752253879354e-05
+  value: 5.0e-05
