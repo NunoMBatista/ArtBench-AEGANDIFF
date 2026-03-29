@@ -573,12 +573,16 @@ def get_step_fn(config: Dict) -> Callable:
 
 
 def main():
-    if len(sys.argv) != 2:
-        print(f"Usage: {sys.argv[0]} <config.yml>")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", help="Path to YAML config file.")
+    parser.add_argument("--seed", type=int, default=None, help="Override the seed in the config.")
+    args = parser.parse_args()
 
-    config_path = sys.argv[1]
+    config_path = args.config
     config = load_config(config_path)
+    if args.seed is not None:
+        config["seed"] = args.seed
     set_global_seed(config["seed"])
 
     model_type = config["model_type"].lower()

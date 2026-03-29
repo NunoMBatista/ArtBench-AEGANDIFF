@@ -236,3 +236,6 @@ __marimo__/
 *.run.xml
 *.synctex.gz
 *.toc
+
+
+**/wandb/
