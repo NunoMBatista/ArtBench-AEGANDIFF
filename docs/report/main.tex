@@ -1,7 +1,10 @@
 \documentclass[runningheads]{llncs}
 
 \usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
 \usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
 
 \begin{document}
 
@@ -11,94 +14,243 @@
 \maketitle
 
 \begin{abstract}
-This report presents the design, training, and evaluation of three generative
-model families on ArtBench-10: a VAE, a DCGAN, and diffusion-based models. As well as some variants of the diffusion model and the GAN, including a pretrained Google DDPM fine-tuning approach. We detail our data pipeline, model architectures, training protocols, and evaluation metrics (FID/KID).
-We compare model behavior on the provided 20\% subset, select the strongest
-approach, and discuss expected full-dataset retraining.
-
+We design, train, and evaluate multiple generative model families on ArtBench-10: a VAE, a DCGAN (and cGAN variant), and diffusion-based models, including fine-tuning of a pretrained Google DDPM. Models are selected via Bayesian hyperparameter sweeps on a 20\% subset and evaluated with FID/KID. Final results are reported for full-dataset training across 10 random seeds.
 \end{abstract}
 
 \section{Introduction}
-% Motivation for generative modeling in artistic domains.
-% Project scope and expected contributions.
-
+We study generative modeling on ArtBench-10, a 10-class dataset of $32\times 32$ paintings \cite{artbench}. We implement and compare a VAE \cite{vae}, a DCGAN and conditional variant (cGAN) \cite{dcgan}, and diffusion-based models \cite{ddpm}, including fine-tuning a pretrained Google DDPM. We evaluate sample quality with FID and KID and report results across 10 random seeds.
 
 \section{Problem Description}
-% ArtBench-10 characteristics (32x32 RGB, 10 styles, 50k train).
-% Why this is a generation task and not classification.
-% Main challenges: fidelity, diversity, style consistency, stability.
+The target domain is ArtBench-10 \cite{artbench}, a curated benchmark of 50,000 training and 10,000 test images across 10 artistic styles. Each image is a $32 \times 32$ RGB painting.
+
+The objective is to learn a generative model $p_\theta(x)$ that can sample plausible paintings while maintaining fidelity and diversity. Key challenges include:
+\begin{itemize}
+    \item \textbf{Fidelity:} Avoiding overly smooth or noisy samples.
+    \item \textbf{Diversity:} Covering multiple styles without collapse.
+    \item \textbf{Stability:} Handling adversarial (GAN) and iterative (diffusion) training dynamics.
+\end{itemize}
 
 \section{Methodology and Approach}
 
 \subsection{Data Pipeline}
-% Data source and folder structure used in the repository.
-% Normalization, batching, subset protocol (20% CSV subset).
-% Full-data retraining plan.
+The data pipeline handles the ArtBench-10 dataset ($32 \times 32$ RGB images, 10 styles). Images are normalized to the range $[-1, 1]$. During the experimentation phase, a 20\% subset (10,000 images) was used for hyperparameter sweeps via Bayesian optimization. Once optimal parameters were identified, the final models were retrained on the full 50,000-image training set.
+
+\subsection{Theoretical Analysis of Hyperparameters}
+We summarize the most influential hyperparameters observed during sweeps.
+
+\subsubsection{Variational Autoencoders (VAE)}
+\begin{itemize}
+    \item \textbf{Mean-seeking:} With an $L2$ reconstruction term, the VAE tends to average out high-frequency details, producing smooth, low-contrast samples.
+    \item \textbf{KL weight:} Lowering the KL coefficient to $\beta=0.5$ reduced regularization pressure and improved sample sharpness.
+\end{itemize}
+
+\subsubsection{Generative Adversarial Networks (GAN)}
+\begin{itemize}
+    \item \textbf{Stability/capacity:} The best setting used \texttt{d\_updates\_per\_g}=1, \texttt{use\_spectral\_norm}=false, and \texttt{latent\_dim}=64. Samples remained prone to high-frequency artifacts consistent with transpose-convolution upsampling.
+\end{itemize}
+
+\subsubsection{Conditional GAN (cGAN)}
+\begin{itemize}
+    \item \textbf{Conditioning:} We used a learned class embedding (dimension 64).
+    \item \textbf{Optimization:} Conditioning increased training sensitivity; in practice, the discriminator could overfit the class signal and reduce useful gradients to the generator.
+\end{itemize}
+
+\subsubsection{Diffusion Models}
+\begin{itemize}
+    \item \textbf{Training length:} For the from-scratch model, extending training to 50 epochs produced the largest quality gains.
+    \item \textbf{Fine-tuning:} For Google DDPM, a higher learning rate ($5 \times 10^{-4}$) improved adaptation from CIFAR-10 priors to ArtBench.
+\end{itemize}
 
 \subsection{Model Families}
 
-\subsubsection{VAE}
-% Architecture summary, latent dimension, beta, reconstruction objective.
+The architectural design choices for each model family were tailored to the $32 \times 32$ resolution. Table \ref{tab:architectures} provides a comparative summary of the structural components across all implemented networks.
 
-\subsubsection{DCGAN}
-% Generator/discriminator design, spectral norm usage, adversarial objective.
+\begin{table}[h]
+\centering
+\caption{Comprehensive architectural summary of the implemented generative models.}\label{tab:architectures}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Feature} & \textbf{VAE} & \textbf{DCGAN / cGAN} & \textbf{Diffusion} & \textbf{Google DDPM} \\ \midrule
+\textbf{Backbone} & 4-Layer CNN & 4-Layer CNN & 2-Stage UNet & 4-Stage UNet \\ 
+\textbf{Upsampling} & Transpose Conv & Transpose Conv & Transpose Conv & Upsample + Conv \\ 
+\textbf{Downsampling} & Strided Conv & Strided Conv & Strided Conv & Strided Conv \\ 
+\textbf{Normalization} & Batch Norm & Batch Norm & Group Norm & Group Norm \\ 
+\textbf{Activation} & LeakyReLU (0.2) & ReLU (G) / LReLU (D) & SiLU (Swish) & SiLU (Swish) \\ 
+\textbf{Bottleneck} & $2 \times 2 \times 512$ & $1 \times 1 \times 64$ & $8 \times 8 \times 512$ & $4 \times 4 \times 512$ \\ 
+\textbf{Conditioning} & N/A & Class Embedding & Time + Class & Timestep \\ 
+\textbf{Attention} & None & None & Bottleneck (Opt) & Multi-head \\ \bottomrule
+\end{tabular}
+}
+\end{table}
+
+\subsubsection{VAE}
+Our VAE implementation features a symmetric 4-layer convolutional architecture (32$\to$16$\to$8$\to$4$\to$2). Each layer employs Batch Normalization and LeakyReLU activations. We employ the reparameterization trick to allow for end-to-end backpropagation through the 256-dimensional stochastic bottleneck.
+
+\subsubsection{DCGAN and cGAN}
+The GAN architectures follow DCGAN \cite{dcgan}. The cGAN variant incorporates a style embedding (dimension 64) concatenated with the noise vector in the generator and injected as an additional channel in the discriminator.
 
 \subsubsection{Diffusion (From Scratch)}
-% UNet design, noise schedule, training objective, sampling strategy.
+Our "TinyUNet" consists of two downsampling and two upsampling stages using Residual Blocks with Group Normalization and SiLU activations. Skip connections preserve high-frequency stylistic details. 
 
-\subsubsection{Diffusion (Pretrained Google DDPM Fine-Tuning)}
-% Pretrained checkpoint and rationale.
-% Freezing strategy (down/mid frozen, up trainable).
-% Low learning rate and scheduler locking.
-% Unconditional setup and observed metric/perception trade-offs.
+\subsubsection{Diffusion (Pretrained Google DDPM)}
+We fine-tuned the \texttt{google/ddpm-cifar10-32} model \cite{google_ddpm}, which uses a larger UNet with self-attention layers.
 
 \subsection{Implementation and Reproducibility}
-% Config-driven experiments (YAML), random seeds, checkpointing.
-% W\&B logging policy and artifact tracking.
-% Hardware/software setup.
+Our pipeline is configuration-driven via YAML files. We utilize Weights \& Biases (W\&B) for real-time metric logging. All experiments were conducted using PyTorch, with random seeds fixed to 67 for hyperparameter comparisons.
 
 \section{Experimental Setup}
 
+\subsection{Hyperparameter Search}
+Hyperparameter selection was performed on a \textbf{20\% training subset} (10,000 images) using \textbf{Bayesian optimization} (Weights \& Biases sweeps). Each sweep run trained a candidate configuration and evaluated sample quality using \textbf{FID} (minimize). For computationally expensive diffusion-based models, sweep runs used reduced evaluation settings (e.g., fewer generated samples and shorter training) and the best configuration was then retrained with the final evaluation settings.
+
+We used model-specific search spaces and budgets, following the rationale in our experiment plan:
+\begin{itemize}
+    \item \textbf{VAE sweep:} $\{\texttt{lr},\ \texttt{latent\_dim},\ \texttt{base\_channels},\ \beta,\ \texttt{batch\_size}\}$, with an effective budget of roughly \textbf{50 runs} (out of 360 possible combinations), stopping when the best FID plateaued for approximately 10 consecutive runs.
+    \item \textbf{DCGAN/cGAN sweep:} $\{\texttt{lr},\ \texttt{latent\_dim},\ \texttt{base\_channels},\ \texttt{d\_updates\_per\_g},\ \texttt{use\_spectral\_norm}\}$, with a budget of roughly \textbf{30 runs} (out of 108 possible combinations), stopping on diminishing returns in best FID.
+    \item \textbf{Custom Diffusion (TinyUNet) sweep:} restricted to the most impactful knobs $\{\texttt{lr},\ \texttt{base\_channels},\ \texttt{use\_attention}\}$ (12 combinations), with about \textbf{20 runs} and reduced sweep settings (e.g., \texttt{eval\_num\_samples}=1000 and 20 epochs).
+    \item \textbf{Google DDPM fine-tuning sweep:} $\{\texttt{lr},\ \texttt{epochs}\}$ (15 combinations), with about \textbf{20 runs} to balance adaptation vs. catastrophic forgetting.
+\end{itemize}
+
+To visualize the explored hyperparameter configurations and their performance trends, we used Weights \& Biases sweep diagnostics. Figure \ref{fig:wandb_parallel_coordinates_all} is reserved for \textbf{parallel coordinates} plots (one per model family). Additionally, we performed \textbf{fANOVA-based importance analysis} to estimate which parameters most strongly influenced FID; Figure \ref{fig:fanova_importance_all} is reserved for the importance summaries (one per model family).
+
+\begin{figure}[h]
+    \centering
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.0}
+    \begin{tabular}{cc}
+        \fbox{\parbox[c][0.18\textheight][c]{0.45\textwidth}{\centering (a) Placeholder: W\&B parallel coordinates (VAE)}} &
+        \fbox{\parbox[c][0.18\textheight][c]{0.45\textwidth}{\centering (b) Placeholder: W\&B parallel coordinates (DCGAN/cGAN)}} \\
+        \fbox{\parbox[c][0.18\textheight][c]{0.45\textwidth}{\centering (c) Placeholder: W\&B parallel coordinates (TinyUNet Diffusion)}} &
+        \fbox{\parbox[c][0.18\textheight][c]{0.45\textwidth}{\centering (d) Placeholder: W\&B parallel coordinates (Google DDPM)}}
+    \end{tabular}
+    \caption{Weights \& Biases parallel coordinates plots for the Bayesian hyperparameter sweeps. Each panel summarizes the relationship between hyperparameter values and FID across runs for one model family. (Placeholders to be replaced with exported W\&B figures.)}
+    \label{fig:wandb_parallel_coordinates_all}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.0}
+    \begin{tabular}{cc}
+        \fbox{\parbox[c][0.16\textheight][c]{0.45\textwidth}{\centering (a) Placeholder: fANOVA importance (VAE)}} &
+        \fbox{\parbox[c][0.16\textheight][c]{0.45\textwidth}{\centering (b) Placeholder: fANOVA importance (DCGAN/cGAN)}} \\
+        \fbox{\parbox[c][0.16\textheight][c]{0.45\textwidth}{\centering (c) Placeholder: fANOVA importance (TinyUNet Diffusion)}} &
+        \fbox{\parbox[c][0.16\textheight][c]{0.45\textwidth}{\centering (d) Placeholder: fANOVA importance (Google DDPM)}}
+    \end{tabular}
+    \caption{fANOVA parameter importance for the hyperparameter sweeps, reporting the estimated contribution of each hyperparameter to FID variance for each model family. (Placeholders to be replaced with exported analysis figures.)}
+    \label{fig:fanova_importance_all}
+\end{figure}
+
+After each sweep, we selected the configuration with the lowest FID on the 20\% subset. We then performed a \textbf{final evaluation} by training that best configuration across \textbf{10 random seeds} and computing FID/KID using \textbf{5,000 generated} samples versus \textbf{5,000 real} samples (KID computed over 50 random subsets of size 100). Finally, we retrained the best-performing model family on the \textbf{full 50k} training set using its best hyperparameters and repeated the 10-seed evaluation.
+
 \subsection{Training Protocol}
-% Hyperparameter tables per model.
-% Number of epochs, optimizer settings, batch size.
+Table \ref{tab:hyperparams} summarizes the final hyperparameters used for the 100\% dataset training.
+
+\begin{table}[h]
+\centering
+\caption{Final hyperparameter configurations for full-dataset training.}\label{tab:hyperparams}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Parameter} & \textbf{VAE} & \textbf{DCGAN} & \textbf{Diffusion} & \textbf{Google DDPM} \\ \midrule
+Learning Rate & $2 \times 10^{-3}$ & $2 \times 10^{-4}$ & $2 \times 10^{-4}$ & $5 \times 10^{-4}$ \\ 
+Batch Size & 256 & 128 & 32 & 32 \\ 
+Epochs & 20 & 20 & 50 & 10 \\ 
+Latent Dim & 256 & 64 & 128 & 128 \\ 
+Base Channels & 128 & 128 & 128 & 128 \\ 
+Optimizer & Adam & Adam & AdamW & AdamW \\ \bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Evaluation Protocol}
-% Mandatory protocol from statement:
-% - 5000 generated samples
-% - 5000 real samples
-% - FID on full sets
-% - KID with 50 subsets of size 100
-% - 10 repetitions with different seeds
-% Report mean +- std for FID/KID.
+Following the project requirements, we generated 5,000 samples for each model and compared them against 5,000 real images.
+\begin{itemize}
+    \item \textbf{FID:} Computed using the full sets of 5,000 generated and 5,000 real images \cite{fid}.
+    \item \textbf{KID:} Computed using 50 random subsets of size 100.
+    \item \textbf{Statistical Robustness:} The entire protocol was repeated across \textbf{10 different random seeds}. We report Mean $\pm$ Standard Deviation.
+\end{itemize}
 
 \section{Results and Analysis}
 
 \subsection{Qualitative Results}
-% Include sample grids for each model family.
-% Comment on fidelity/diversity/style coherence.
+Visual inspection of 64-sample grids reveals distinct model characteristics across the different families.
+
+\begin{figure}[h]
+    \centering
+    \setlength{\tabcolsep}{6pt}
+    \renewcommand{\arraystretch}{1.0}
+    \begin{tabular}{cc}
+        \includegraphics[width=0.45\textwidth]{placeholder_vae.png} &
+        \includegraphics[width=0.45\textwidth]{placeholder_dcgan.png} \\
+        \includegraphics[width=0.45\textwidth]{placeholder_cgan.png} &
+        \includegraphics[width=0.45\textwidth]{placeholder_diffusion.png}
+    \end{tabular}
+    \caption{Qualitative samples (64-image grids) from the four main model families evaluated on ArtBench-10: (top-left) VAE, (top-right) DCGAN, (bottom-left) cGAN, and (bottom-right) custom TinyUNet diffusion. (Placeholders to be replaced with exported sample grids.)}
+    \label{fig:qual_main_families}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{placeholder_google_ddpm.png}
+    \caption{Samples from the fine-tuned Google DDPM, demonstrating superior structural coherence and recognizable shapes compared to the other models.}\label{fig:qual_google_ddpm}
+\end{figure}
 
 \subsection{Quantitative Results}
-% Table: FID mean +- std, KID mean +- std (all required runs).
-% Keep evaluation code path fixed across models.
+Table \ref{tab:quantitative_results} presents the results of the 10-seed evaluation on the full dataset.
+
+\begin{table}[h]
+\centering
+\caption{Quantitative results (Mean $\pm$ Std Dev) across 10 random seeds.}\label{tab:quantitative_results}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{FID $\downarrow$} & \textbf{KID ($\times 10^{-3}$) $\downarrow$} \\ \midrule
+VAE & $355.26 \pm 1.32$ & $370.3 \pm 4.0$ \\ 
+DCGAN & $91.02 \pm 0.65$ & $69.0 \pm 1.5$ \\ 
+cGAN & $393.68 \pm 1.36$ & $329.1 \pm 2.6$ \\ 
+Diffusion (TinyUNet) & $\mathbf{43.03 \pm 0.51}$ & $\mathbf{26.7 \pm 1.0}$ \\ 
+Google DDPM (Fine-tuned) & $97.49 \pm 1.26$ & $90.5 \pm 1.5$ \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training Dynamics}
+Loss curves (Figure \ref{fig:loss_curves}) highlight different optimization behavior across model families:
+
+\begin{itemize}
+    \item \textbf{GAN:} Adversarial losses oscillate and do not necessarily decrease monotonically, consistent with a non-stationary minimax objective.
+    \item \textbf{Diffusion:} Noise-prediction MSE decreases smoothly during training, reflecting a supervised regression-style objective \cite{ddpm}.
+\end{itemize}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{placeholder_loss_curves.png}
+    \caption{Comparison of training signatures: The DCGAN (top) shows adversarial fluctuations, while the Diffusion model (bottom) shows smooth convergence on the stationary noise-MSE objective.}\label{fig:loss_curves}
+\end{figure}
 
 \subsection{Ablations and Discussion}
-% Explain major design choices and observed effects.
-% Example: pretrained diffusion visual quality vs FID/KID behavior.
-% Example: flat diffusion noise-MSE during fine-tuning.
+Our results highlight several key trade-offs:
+\begin{itemize}
+    \item \textbf{Unconditional vs. Conditional:} DCGAN significantly outperformed cGAN, suggesting that style-conditioning adds complexity that requires higher capacity or more training.
+    \item \textbf{Diffusion Dominance:} Diffusion models achieved the best FID, benefiting from a stable MSE loss landscape and skip connections.
+    \item \textbf{Perceptual Quality:} While TinyUNet Diffusion achieved the lowest FID ($43.03$), the \textbf{fine-tuned Google DDPM} produced the most coherent samples by visual inspection despite a higher FID ($97.49$).
+    \item \textbf{GAN Artifacts:} Despite good FID, DCGAN samples suffer from checkerboard noise, highlighting that metrics do not always align with human perception of quality.
+\end{itemize}
+
+\paragraph{Why Google DDPM can look better but score worse.}
+FID and KID evaluate distributional similarity in a fixed feature space rather than directly measuring perceived coherence \cite{fid}. The fine-tuned Google DDPM starts from a strong pretrained prior (CIFAR-10), which can preserve globally coherent structure after adaptation; however, its samples can remain partially misaligned with ArtBench feature statistics (e.g., texture and style cues), leading to higher FID/KID despite visually plausible outputs. In addition, a model may produce a subset of high-quality samples while under-covering modes (reduced diversity), which is penalized by FID/KID even when qualitative grids appear strong.
 
 \section{Conclusion}
-% Final comparison summary.
-% Best model on subset and rationale.
-% Full-data retraining status/final outcome.
-% Limitations and short future work notes.
+On ArtBench-10, diffusion-based models provided the best overall performance under our evaluation protocol. Quantitatively, the custom TinyUNet diffusion model achieved the lowest FID, while qualitatively the fine-tuned Google DDPM produced the most coherent samples.
 
 \section*{Use of External Resources and AI Tools}
-% List external repositories, pretrained components, and AI assistants used.
-% Describe how each was used and how outputs were validated.
+This project utilized ArtBench-10 (Kaggle). We used the \texttt{diffusers} library and \texttt{google/ddpm-cifar10-32} (Hugging Face). Gemini assisted in LaTeX formatting and analysis verification.
 
 \begin{thebibliography}{10}
-% Add project references here (ArtBench, VAE, DCGAN, DDPM, evaluation metrics, etc.).
+\bibitem{artbench} Liao, P. et al. (2022). The ArtBench Dataset. arXiv:2206.11404.
+\bibitem{vae} Kingma, D. P. et al. (2013). Auto-Encoding Variational Bayes. arXiv:1312.6114.
+\bibitem{dcgan} Radford, A. et al. (2015). Unsupervised Representation Learning with DCGANs. ICLR 2016.
+\bibitem{ddpm} Ho, J. et al. (2020). Denoising Diffusion Probabilistic Models. NeurIPS 2020.
+\bibitem{google_ddpm} Google. (2020). DDPM CIFAR-10 32x32. Hugging Face.
+\bibitem{fid} Heusel, M. et al. (2017). GANs Trained by a Two Time-Scale Update Rule. NIPS 2017.
 \end{thebibliography}
 
 \end{document}
