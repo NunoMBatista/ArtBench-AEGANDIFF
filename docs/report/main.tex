@@ -33,33 +33,11 @@ The objective is to learn a generative model $p_\theta(x)$ that can sample plaus
 \section{Methodology and Approach}
 
 \subsection{Data Pipeline}
-The data pipeline handles the ArtBench-10 dataset ($32 \times 32$ RGB images, 10 styles). Images are normalized to the range $[-1, 1]$. During the experimentation phase, a 20\% subset (10,000 images) was used for hyperparameter sweeps via Bayesian optimization. Once optimal parameters were identified, the final models were retrained on the full 50,000-image training set.
+The data pipeline handles the ArtBench-10 dataset ($32 \times 32$ RGB images, 10 styles). Images are converted from integer pixels to floating point and normalized to the range $[-1, 1]$ via
+$$x' = 2\cdot\frac{x}{255} - 1.$$
+This normalization centers the data around zero and standardizes the dynamic range across models, which improves numerical conditioning for gradient-based optimization and aligns the data scale with common generative-model output parameterizations (e.g., a \texttt{tanh} output layer naturally produces values in $[-1,1]$). For diffusion models, using a symmetric, zero-centered range is also convenient because the forward noising process is defined around zero-mean Gaussian noise.
 
-\subsection{Theoretical Analysis of Hyperparameters}
-We summarize the most influential hyperparameters observed during sweeps.
-
-\subsubsection{Variational Autoencoders (VAE)}
-\begin{itemize}
-    \item \textbf{Mean-seeking:} With an $L2$ reconstruction term, the VAE tends to average out high-frequency details, producing smooth, low-contrast samples.
-    \item \textbf{KL weight:} Lowering the KL coefficient to $\beta=0.5$ reduced regularization pressure and improved sample sharpness.
-\end{itemize}
-
-\subsubsection{Generative Adversarial Networks (GAN)}
-\begin{itemize}
-    \item \textbf{Stability/capacity:} The best setting used \texttt{d\_updates\_per\_g}=1, \texttt{use\_spectral\_norm}=false, and \texttt{latent\_dim}=64. Samples remained prone to high-frequency artifacts consistent with transpose-convolution upsampling.
-\end{itemize}
-
-\subsubsection{Conditional GAN (cGAN)}
-\begin{itemize}
-    \item \textbf{Conditioning:} We used a learned class embedding (dimension 64).
-    \item \textbf{Optimization:} Conditioning increased training sensitivity; in practice, the discriminator could overfit the class signal and reduce useful gradients to the generator.
-\end{itemize}
-
-\subsubsection{Diffusion Models}
-\begin{itemize}
-    \item \textbf{Training length:} For the from-scratch model, extending training to 50 epochs produced the largest quality gains.
-    \item \textbf{Fine-tuning:} For Google DDPM, a higher learning rate ($5 \times 10^{-4}$) improved adaptation from CIFAR-10 priors to ArtBench.
-\end{itemize}
+During the experimentation phase, a 20\% subset (10,000 images) was used for hyperparameter sweeps via Bayesian optimization. Once optimal parameters were identified, the final models were retrained on the full 50,000-image training set.
 
 \subsection{Model Families}
 
@@ -98,6 +76,44 @@ We fine-tuned the \texttt{google/ddpm-cifar10-32} model \cite{google_ddpm}, whic
 
 \subsection{Implementation and Reproducibility}
 Our pipeline is configuration-driven via YAML files. We utilize Weights \& Biases (W\&B) for real-time metric logging. All experiments were conducted using PyTorch, with random seeds fixed to 67 for hyperparameter comparisons.
+
+\subsection{Theoretical Analysis of Hyperparameters}
+We summarize the swept hyperparameters and their primary effects on optimization stability, capacity, and sample quality.
+
+\subsubsection{Variational Autoencoders (VAE)}
+\begin{itemize}
+    \item \textbf{Learning rate (\texttt{lr}):} Controls optimization step size; too large can destabilize training and degrade reconstructions, while too small slows convergence.
+    \item \textbf{Latent dimension (\texttt{latent\_dim}):} Sets bottleneck capacity; larger values increase expressiveness but can weaken regularization and encourage blurry reconstructions if the decoder dominates.
+    \item \textbf{Base channels (\texttt{base\_channels}):} Scales network width and capacity; increasing it typically improves fidelity at higher compute cost.
+    \item \textbf{KL weight ($\beta$):} Scales the KL regularizer in the VAE objective, i.e., it weights the pressure for $q_\phi(z\mid x)$ to match the prior $p(z)$. With a reconstruction loss term (here, effectively an $L2$-style distortion term) and a KL term, increasing $\beta$ reduces the information capacity of the latent (it discourages encoding fine detail in $z$), typically improving sampling from the prior and latent smoothness but worsening reconstruction fidelity. Decreasing $\beta$ does the opposite: it behaves more like a deterministic autoencoder ($\beta \to 0$), often improving reconstructions but producing a latent distribution that deviates from the prior, which can harm unconditional sample quality when sampling $z\sim p(z)$.
+    \item \textbf{Batch size (\texttt{batch\_size}):} Affects gradient noise and effective learning rate; larger batches stabilize optimization but reduce stochastic regularization.
+\end{itemize}
+
+\subsubsection{Generative Adversarial Networks (GAN)}
+\begin{itemize}
+    \item \textbf{Learning rate (\texttt{lr}):} One of the most sensitive GAN hyperparameters; higher values can cause divergence or oscillations in the discriminator--generator game.
+    \item \textbf{Latent dimension (\texttt{latent\_dim}):} Controls the dimensionality of the generator input noise; too small can limit diversity, while too large can make mapping harder without improving quality.
+    \item \textbf{Base channels (\texttt{base\_channels}):} Changes generator/discriminator capacity; imbalance can lead to either an overpowered discriminator (vanishing gradients) or an underpowered discriminator (poor signal).
+    \item \textbf{Discriminator updates (\texttt{d\_updates\_per\_g}):} Sets the ratio of discriminator steps per generator step; increasing it can stabilize training when the discriminator is weak, but can also over-train the discriminator and stall generator learning.
+    \item \textbf{Spectral normalization (\texttt{use\_spectral\_norm}):} Constrains discriminator Lipschitzness, often improving stability, but can reduce discriminator flexibility and slow learning depending on the regime.
+    \item \textbf{Observed regime:} The best setting used \texttt{d\_updates\_per\_g}=1, \texttt{use\_spectral\_norm}=false, and \texttt{latent\_dim}=64. Samples remained prone to high-frequency artifacts consistent with transpose-convolution upsampling.
+\end{itemize}
+
+\subsubsection{Conditional GAN (cGAN)}
+\begin{itemize}
+    \item \textbf{Generator conditioning (concat in latent space):} Given a noise vector $z$ (dimension $d$) and a class label $y$, the generator embeds the label with an embedding layer $e(y)$ (dimension 64) and concatenates them $[z; e(y)]$. The concatenated vector is reshaped to $(d+64)\times 1\times 1$ and fed through the standard DCGAN transposed-convolution stack. This makes the class signal available from the first layer onward.
+    \item \textbf{Discriminator conditioning (label as an image channel):} The discriminator embeds $y$ into a vector of size $32\cdot 32$, reshapes it into a $1\times 32\times 32$ map, and concatenates it with the RGB image as an extra input channel (input becomes $4\times 32\times 32$). The discriminator therefore learns to score joint pairs $(x,y)$ rather than marginal realism of $x$.
+    \item \textbf{Effect on optimization:} Conditioning increases discriminator capacity (it can use the label map as a shortcut feature). If the discriminator learns class-specific cues faster than the generator can match them, gradients to the generator become less informative, reducing both diversity and conditional fidelity.
+\end{itemize}
+
+\subsubsection{Diffusion Models}
+\begin{itemize}
+    \item \textbf{Learning rate (\texttt{lr}):} Controls how quickly the denoiser fits the noise-prediction objective; too large can harm stability or lead to overshooting, while too small slows convergence.
+    \item \textbf{Base channels (\texttt{base\_channels}):} Sets UNet width; larger models typically improve sample fidelity and style capture at increased compute.
+    \item \textbf{Attention (\texttt{use\_attention}):} When enabled, the TinyUNet inserts a multi-head self-attention block at the bottleneck feature map (after the mid residual block, at the lowest spatial resolution). Concretely, it computes $Q,K,V$ via a $1\times 1$ convolution, flattens the $H\times W$ spatial grid into tokens, and applies scaled dot-product attention so each location can aggregate information from all other locations. The attention output is projected back with a $1\times 1$ convolution and added residually. This can improve global coherence (e.g., consistent structure across distant regions) at relatively low cost because the bottleneck has the smallest $H\times W$.
+    \item \textbf{Training length:} For the from-scratch model, extending training to 50 epochs produced the largest quality gains.
+    \item \textbf{Fine-tuning:} For Google DDPM, a higher learning rate ($5 \times 10^{-4}$) improved adaptation from CIFAR-10 priors to ArtBench.
+\end{itemize}
 
 \section{Experimental Setup}
 
@@ -233,6 +249,7 @@ Our results highlight several key trade-offs:
     \item \textbf{Diffusion Dominance:} Diffusion models achieved the best FID, benefiting from a stable MSE loss landscape and skip connections.
     \item \textbf{Perceptual Quality:} While TinyUNet Diffusion achieved the lowest FID ($43.03$), the \textbf{fine-tuned Google DDPM} produced the most coherent samples by visual inspection despite a higher FID ($97.49$).
     \item \textbf{GAN Artifacts:} Despite good FID, DCGAN samples suffer from checkerboard noise, highlighting that metrics do not always align with human perception of quality.
+    \item \textbf{VAE smoothness:} VAEs optimized with an $L2$-style reconstruction loss are mean-seeking: when multiple high-frequency outcomes are plausible, the decoder is rewarded for predicting an average, which tends to wash out texture and contrast. This effect belongs to the model--loss combination (not a single sweep knob), and helps explain the qualitatively smoother samples.
 \end{itemize}
 
 \paragraph{Why Google DDPM can look better but score worse.}
