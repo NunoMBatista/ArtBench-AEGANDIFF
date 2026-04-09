@@ -12,3 +12,6 @@ diffusers
 accelerate
 huggingface_hub
 safetensors
+optuna
+scikit-learn
+pandas

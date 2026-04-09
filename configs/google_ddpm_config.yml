@@ -4,8 +4,8 @@ device: "cuda"
 # Dataset
 kaggle_root: "data"
 batch_size: 32
-num_workers: 2
-use_subset: true
+num_workers: 0 # Windows sweep stability: avoids spawn/pickle worker crashes.
+use_subset: false
 subset_mode: "csv"
 subset_csv_path: "provided/training_20_percent.csv"
 subset_seed: 67
@@ -20,7 +20,7 @@ sample_steps: 100
 disable_attention_on_cpu: false # Avoid known CPU backward crashes in attention blocks.
 
 # Training
-epochs: 40
+epochs: 200
 lr: 0.0002 # try 0.0002 after (default lr for the other diffusion) # Low LR to avoid catastrophic forgetting on pretrained weights.
 run_prefix: "run_google_ddpm"
 checkpoint_every_epochs: 5

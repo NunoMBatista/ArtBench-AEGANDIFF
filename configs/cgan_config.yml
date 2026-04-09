@@ -1,5 +1,5 @@
 seed: 67
-device: "cpu"
+device: "cuda"
 
 # Dataset
 kaggle_root: "data"

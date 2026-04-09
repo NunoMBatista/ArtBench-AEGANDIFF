@@ -1,0 +1,5 @@
+https://wandb.ai/nunombatista-university-of-coimbra/ArtBench-AEGANDIFF/sweeps/5mnl5gn9 "VAE Sweep fANOVA Analysis"
+https://wandb.ai/nunombatista-university-of-coimbra/ArtBench-AEGANDIFF/sweeps/o3mmi4zz "DCGAN Sweep fANOVA Analysis"
+https://wandb.ai/nunombatista-university-of-coimbra/ArtBench-AEGANDIFF/sweeps/o1y64mdj "CGAN Sweep fANOVA Analysis"
+https://wandb.ai/nunombatista-university-of-coimbra/ArtBench-AEGANDIFF/sweeps/6w4jjxq1 "Diffusion Sweep fANOVA Analysis"
+https://wandb.ai/nunombatista-university-of-coimbra/ArtBench-AEGANDIFF/sweeps/bs0q3yf5 "Google DDPM Sweep fANOVA Analysis"

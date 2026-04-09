@@ -1,0 +1,20 @@
+program: src/train.py
+command:
+  - env/Scripts/python
+  - ${program}
+  - configs/cgan_config.yml
+method: bayes
+metric:
+  name: fid
+  goal: minimize
+parameters:
+  base_channels:
+    values: [64, 128]
+  d_updates_per_g:
+    values: [1, 2, 5]
+  latent_dim:
+    values: [64, 100, 128]
+  lr:
+    values: [5e-05, 0.0002, 0.001]
+  use_spectral_norm:
+    values: [true, false]

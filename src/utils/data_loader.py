@@ -1,4 +1,5 @@
 import csv
+import os
 import pickle
 from pathlib import Path
 
@@ -168,18 +169,28 @@ def get_dataloaders(
 	train_ds = ArtBenchKaggleDataset(train_images, train_labels)
 	test_ds = ArtBenchKaggleDataset(test_images, test_labels)
 
+	effective_num_workers = int(num_workers)
+	if os.name == "nt" and effective_num_workers > 0:
+		# Windows uses spawn-based workers, which is less robust for large in-memory
+		# datasets inside sweep/agent subprocesses. Default to single-process loading.
+		print(
+			f"WARNING: num_workers={effective_num_workers} on Windows can cause "
+			"multiprocessing/pickle crashes during long runs. Falling back to num_workers=0."
+		)
+		effective_num_workers = 0
+
 	train_loader = DataLoader(
 		train_ds,
 		batch_size=batch_size,
 		shuffle=shuffle_train,
-		num_workers=num_workers,
+		num_workers=effective_num_workers,
 		pin_memory=True,
 	)
 	test_loader = DataLoader(
 		test_ds,
 		batch_size=batch_size,
 		shuffle=False,
-		num_workers=num_workers,
+		num_workers=effective_num_workers,
 		pin_memory=True,
 	)
 

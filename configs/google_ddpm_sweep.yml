@@ -1,0 +1,26 @@
+program: src/train.py
+command:
+  - env/Scripts/python
+  - ${program}
+  - configs/google_ddpm_config.yml
+method: bayes
+metric:
+  name: fid
+  goal: minimize
+parameters:
+  lr:
+    values: [1e-05, 5e-05, 0.0002, 0.0005, 0.01]
+  epochs:
+    values: [10, 20, 40]
+
+  # Sweep-run settings from docs/experiments_to_run.md
+  use_subset:
+    value: true
+
+  # Keep these fixed during sweep
+  sample_steps:
+    value: 100
+  batch_size:
+    value: 32
+  optimizer.weight_decay:
+    value: 0.0001

@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 from datetime import datetime
@@ -32,6 +33,63 @@ from src.utils.seed_setter import set_global_seed
 
 Batch = Tuple[torch.Tensor, torch.Tensor]
 StepFn = Callable[[torch.nn.Module, Batch, torch.device, bool], Tuple[torch.Tensor, Dict[str, float]]]
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train generative models on ArtBench")
+    parser.add_argument("config", type=str, help="Path to YAML config file")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the seed value from the config file",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        "-c",
+        type=str,
+        default="",
+        help="Path to checkpoint file to load before training",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue epoch count from checkpoint epoch (requires checkpoint with 'epoch')",
+    )
+    return parser.parse_args()
+
+
+def _optimizer_state_dict(
+    optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]]
+) -> Dict:
+    if isinstance(optimizer, dict):
+        return {name: opt.state_dict() for name, opt in optimizer.items()}
+    return optimizer.state_dict()
+
+
+def _load_optimizer_state(
+    optimizer: Union[torch.optim.Optimizer, Dict[str, torch.optim.Optimizer]],
+    optimizer_state: Optional[Dict],
+) -> bool:
+    if optimizer_state is None:
+        return False
+    try:
+        if isinstance(optimizer, dict):
+            if not isinstance(optimizer_state, dict):
+                return False
+            loaded_any = False
+            for name, opt in optimizer.items():
+                state = optimizer_state.get(name)
+                if state is None:
+                    continue
+                opt.load_state_dict(state)
+                loaded_any = True
+            return loaded_any
+        optimizer.load_state_dict(optimizer_state)
+        return True
+    except Exception as e:
+        print(f"WARNING: could not load optimizer state from checkpoint ({e}).")
+        return False
 
 
 def load_config(path: str) -> Dict:
@@ -118,13 +176,21 @@ def train_loop(
     d_updates_per_g: int = 1,
     checkpoint_dir: Optional[str] = None,
     checkpoint_every_epochs: int = 0,
+    start_epoch: int = 1,
     epoch_logger: Optional[Callable[[Dict], None]] = None,
     epoch_eval_fn: Optional[Callable[[int], Dict[str, float]]] = None,
 ):
     history = []
 
     # For each epoch, run training and validation (if provided)
-    for epoch in range(1, epochs + 1):
+    if start_epoch > epochs:
+        print(
+            f"WARNING: start_epoch ({start_epoch}) is greater than epochs ({epochs}). "
+            "No training epochs will run."
+        )
+        return history
+
+    for epoch in range(start_epoch, epochs + 1):
         # Run training
         train_loss, train_metrics = run_epoch(
             model, train_loader, optimizer, step_fn, device, train=True, d_updates_per_g=d_updates_per_g
@@ -164,7 +230,11 @@ def train_loop(
         if checkpoint_dir and checkpoint_every_epochs > 0 and (epoch % checkpoint_every_epochs == 0):
             ckpt_name = f"model_epoch_{epoch:03d}.pt"
             torch.save(
-                {"epoch": epoch, "model_state": model.state_dict()},
+                {
+                    "epoch": epoch,
+                    "model_state": model.state_dict(),
+                    "optimizer_state": _optimizer_state_dict(optimizer),
+                },
                 os.path.join(checkpoint_dir, ckpt_name),
             )
     return history
@@ -371,8 +441,8 @@ def get_optimizer(model: torch.nn.Module, config: Dict) -> Union[torch.optim.Opt
 
     elif model_type in ("dcgan", "cgan"):
         # GANs usually need specific betas for stability
-        g_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
-        d_betas = tuple(optim_cfg.get("betas", [0.0, 0.999]))
+        g_betas = tuple(float(b) for b in optim_cfg.get("betas", [0.0, 0.999]))
+        d_betas = tuple(float(b) for b in optim_cfg.get("betas", [0.0, 0.999]))
 
         opt_g = torch.optim.Adam(
             model.generator.parameters(),
@@ -573,12 +643,7 @@ def get_step_fn(config: Dict) -> Callable:
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config", help="Path to YAML config file.")
-    parser.add_argument("--seed", type=int, default=None, help="Override the seed in the config.")
-    args = parser.parse_args()
-
+    args = _parse_args()
     config_path = args.config
     config = load_config(config_path)
     if args.seed is not None:
@@ -610,6 +675,29 @@ def main():
     model = get_model(config, device)
     optimizer = get_optimizer(model, config)
     step_fn = get_step_fn(config)
+
+    start_epoch = 1
+    if args.checkpoint:
+        state = torch.load(args.checkpoint, map_location=device)
+        if isinstance(state, dict) and "model_state" in state:
+            model.load_state_dict(state["model_state"])
+            loaded_opt = _load_optimizer_state(optimizer, state.get("optimizer_state"))
+            if args.resume:
+                ckpt_epoch = state.get("epoch")
+                if ckpt_epoch is None:
+                    print("WARNING: --resume requested but checkpoint has no 'epoch'. Starting from epoch 1.")
+                else:
+                    start_epoch = int(ckpt_epoch) + 1
+            print(
+                f"Loaded checkpoint '{args.checkpoint}'. "
+                f"Optimizer state loaded: {'yes' if loaded_opt else 'no'}."
+            )
+        else:
+            # Backward compatibility with bare state_dict checkpoints.
+            model.load_state_dict(state)
+            if args.resume:
+                print("WARNING: --resume requested but checkpoint has no metadata. Starting from epoch 1.")
+            print(f"Loaded model weights from '{args.checkpoint}'.")
 
     def _epoch_logger(log: Dict):
         if wandb_run is not None:
@@ -652,6 +740,7 @@ def main():
         d_updates_per_g=config.get("d_updates_per_g", 1),
         checkpoint_dir=run_dir,
         checkpoint_every_epochs=int(config.get("checkpoint_every_epochs", 0)),
+        start_epoch=start_epoch,
         epoch_logger=_epoch_logger,
         epoch_eval_fn=_epoch_eval_fn,
     )
@@ -679,7 +768,15 @@ def main():
     with open(os.path.join(run_dir, "config.yml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False)
 
-    torch.save({"model_state": model.state_dict()}, os.path.join(run_dir, "model.pt"))
+    final_epoch = (history[-1]["epoch"] if history else max(0, start_epoch - 1))
+    torch.save(
+        {
+            "epoch": final_epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": _optimizer_state_dict(optimizer),
+        },
+        os.path.join(run_dir, "model.pt"),
+    )
 
     if wandb_run is not None and wandb is not None:
         try:

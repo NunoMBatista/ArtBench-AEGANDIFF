@@ -15,9 +15,19 @@
 ## Train
 
 ```bash
-python src/train.py configs/dcgan_config.yml --checkpoint outputs/run_dcgan_20260317/model.pt
+python src/train.py configs/dcgan_config.yml
 ```
-**Note:** ```--checkpoint``` parameter is optional
+
+Resume from a saved checkpoint:
+
+```bash
+python src/train.py configs/google_ddpm_config.yml --checkpoint outputs/run_google_ddpm_20260326_194231/model_epoch_070.pt --resume
+```
+
+Notes:
+- `--checkpoint` loads model weights (and optimizer state when available).
+- `--resume` continues epoch numbering from the checkpoint `epoch + 1`.
+- If checkpoint metadata is missing `epoch`, training falls back to starting at epoch 1.
 
 - Outputs are written to `outputs/run_<model>_<timestamp>/`.
 

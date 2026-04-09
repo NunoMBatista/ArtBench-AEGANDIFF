@@ -1,0 +1,30 @@
+program: src/train.py
+command:
+  - env/Scripts/python
+  - ${program}
+  - configs/diffusion_config.yml
+method: bayes
+metric:
+  name: fid
+  goal: minimize
+parameters:
+  lr:
+    values: [5e-05, 0.0002, 0.0005]
+  base_channels:
+    values: [64, 128]
+  use_attention:
+    values: [true, false]
+
+  # Sweep-run settings from docs/experiments_to_run.md
+  epochs:
+    value: 20
+  eval_num_samples:
+    value: 1000
+
+  # Keep these fixed during sweep
+  num_diffusion_steps:
+    value: 1000
+  sample_steps:
+    value: 100
+  guidance_scale:
+    value: 2.0
