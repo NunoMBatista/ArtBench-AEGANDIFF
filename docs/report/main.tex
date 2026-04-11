@@ -246,12 +246,13 @@ Visual inspection of 64-sample grids in Figures \ref{fig:qual_main_families} and
     \setlength{\tabcolsep}{6pt}
     \renewcommand{\arraystretch}{1.0}
     \begin{tabular}{cc}
-        \includegraphics[width=0.40\textwidth]{images/vae_8x8.png} &
-        \includegraphics[width=0.40\textwidth]{images/dcgan_8x8.png} \\
-        \includegraphics[width=0.40\textwidth]{images/cgan_8x8.png} &
-        \includegraphics[width=0.40\textwidth]{images/diffusion_8x8.png}
+        \includegraphics[width=0.45\textwidth]{images/vae_8x8.png} &
+        \includegraphics[width=0.45\textwidth]{images/dcgan_8x8.png} \\
+        \includegraphics[width=0.45\textwidth]{images/cgan_8x8.png} &
+        \includegraphics[width=0.45\textwidth]{images/diffusion_8x8.png}
     \end{tabular}
-    \caption{Qualitative samples (64-image grids) from the four main model families evaluated on ArtBench-10.}
+    \vspace{-0.25cm}
+    \caption{Qualitative samples from the main model families evaluated on ArtBench-10.}
     \label{fig:qual_main_families}
 \end{figure}
 
@@ -263,10 +264,9 @@ Visual inspection of 64-sample grids in Figures \ref{fig:qual_main_families} and
         \includegraphics[width=0.45\textwidth]{images/google_8x8.png}
         \includegraphics[width=0.45\textwidth]{images/google_best.png}
     \end{tabular}
-    \caption{Samples from the fine-tuned Google DDPM on the entire dataset (left: 20 epochs / right: 200 epochs), demonstrating superior structural coherence and recognizable shapes compared to the other models}\label{fig:qual_google_ddpm}
+    \vspace{-0.2cm}
+    \caption{Samples from the fine-tuned Google DDPM (left: 20 epochs / right: 200 epochs), demonstrating more recognizable shapes compared to the other models}\label{fig:qual_google_ddpm}
 \end{figure}
-
-\newpage
 
 \subsection{Quantitative Results}
 Table \ref{tab:quantitative_results} presents the results of the 10-seed evaluation on both the full dataset and the 20\% subset used for hyperparameter selection.
