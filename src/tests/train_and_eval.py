@@ -1,13 +1,15 @@
-"""Train all 5 models once (seed=67, 100% ArtBench), save 5 .pt files,
-then evaluate each trained model with 10 different seeds (1-10) and produce
-a summary histogram (mean ± std).
+"""Train all 5 models once (seed=67, 100% ArtBench by default), save 5 .pt
+files, then evaluate each trained model with 10 different seeds (1-10) and
+produce a summary histogram (mean ± std).
 
 Run from the repo root:
-    python src/train_and_eval.py
+    python src/tests/train_and_eval.py            # full 50k dataset
+    python src/tests/train_and_eval.py --subset   # 20% subset (~10k images)
 """
 
 import json
 import os
+import sys
 from datetime import datetime
 from typing import Dict, List
 
@@ -16,6 +18,7 @@ import numpy as np
 import torch
 from dotenv import load_dotenv
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from globals import ensure_repo_root
 ensure_repo_root()
 load_dotenv()
@@ -207,7 +210,7 @@ def eval_model(
 
 # ── Plotting ──────────────────────────────────────────────────────────────────
 
-def plot_results(all_results: Dict[str, List[Dict]], out_dir: str) -> str:
+def plot_results(all_results: Dict[str, List[Dict]], out_dir: str, dataset_label: str = "100% ArtBench") -> str:
     model_names = list(all_results.keys())
     fid_by_model = {m: [r["fid"] for r in all_results[m]] for m in model_names}
     kid_by_model = {m: [r["kid_mean"] for r in all_results[m]] for m in model_names}
@@ -217,10 +220,11 @@ def plot_results(all_results: Dict[str, List[Dict]], out_dir: str) -> str:
     width = 0.5
     rng = np.random.default_rng(0)
 
-    for ax, scores_by_model, ylabel in zip(
+    for ax, scores_by_model, ylabel, ann_fmt in zip(
         axes,
         [fid_by_model, kid_by_model],
         ["FID ↓", "KID ↓"],
+        [".1f", ".3f"],
     ):
         means = np.array([np.mean(scores_by_model[m]) for m in model_names])
         stds = np.array([np.std(scores_by_model[m]) for m in model_names])
@@ -244,14 +248,14 @@ def plot_results(all_results: Dict[str, List[Dict]], out_dir: str) -> str:
         for i, (mu, sigma) in enumerate(zip(means, stds)):
             ax.text(
                 i, mu + sigma + y_pad,
-                f"{mu:.1f}±{sigma:.1f}",
+                f"{mu:{ann_fmt}}±{sigma:{ann_fmt}}",
                 ha="center", va="bottom", fontsize=8.5,
             )
 
         ax.set_xticks(x)
         ax.set_xticklabels(model_names, fontsize=12)
         ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_title(f"{ylabel} — 10 eval seeds, 100 % ArtBench (trained seed={TRAIN_SEED})", fontsize=12)
+        ax.set_title(f"{ylabel} — 10 eval seeds, {dataset_label} (trained seed={TRAIN_SEED})", fontsize=12)
         ax.grid(axis="y", linestyle="--", alpha=0.35)
         ax.set_xlim(-0.6, len(model_names) - 0.4)
 
@@ -308,8 +312,26 @@ def plot_loss_curves(all_histories: Dict[str, List[Dict]], out_dir: str) -> str:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Train all models and evaluate with 10 seeds.")
+    parser.add_argument(
+        "--subset",
+        action="store_true",
+        help="Train on the 20%% subset (~10k images) instead of the full 50k dataset.",
+    )
+    args = parser.parse_args()
+
+    if args.subset:
+        for cfg in BEST_CONFIGS.values():
+            cfg["use_subset"] = True
+        dataset_label = "20% subset"
+        run_tag = "subset"
+    else:
+        dataset_label = "100% ArtBench"
+        run_tag = "full"
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = os.path.join("outputs", f"final_eval_{timestamp}")
+    out_dir = os.path.join("outputs", f"final_eval_{run_tag}_{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
     print(f"Output directory: {out_dir}\n")
 
@@ -357,7 +379,7 @@ def main():
             f" {np.mean(kids):>10.4f} {np.std(kids):>10.4f}"
         )
 
-    hist_path = plot_results(all_results, out_dir)
+    hist_path = plot_results(all_results, out_dir, dataset_label)
     print(f"\nHistogram -> {hist_path}")
 
     loss_overview_path = plot_loss_curves(all_histories, out_dir)
