@@ -21,7 +21,7 @@ We design, train, and evaluate multiple generative model families on ArtBench-10
 \end{abstract}
 
 \section{Introduction}
-We study generative modeling on ArtBench-10, a 10-class dataset of $32\times 32$ paintings \cite{artbench}. We implement and compare a VAE \cite{vae}, a DCGAN and conditional variant (cGAN) \cite{dcgan}, and diffusion-based models \cite{ddpm}, including fine-tuning a pretrained Google DDPM. We evaluate sample quality with FID and KID and report results across 10 random seeds.
+We study generative modeling on ArtBench-10, a 10-class dataset of $32\times 32$ paintings \cite{artbench}. We implement and compare a VAE \cite{vae}, a DCGAN and conditional variant (cGAN) \cite{dcgan}, and diffusion-based models \cite{ddpm}, including fine-tuning a pretrained Google DDPM. We evaluate sample quality with FID \cite{fid} and KID \cite{kid} and report results across 10 random seeds.
 
 \section{Problem Description}
 The target domain is ArtBench-10 \cite{artbench}, a curated benchmark of 50,000 training and 10,000 test images across 10 artistic styles. Each image is a $32 \times 32$ RGB painting.
@@ -333,6 +333,7 @@ This project utilized ArtBench-10 (Kaggle). We used the \texttt{diffusers} libra
 \bibitem{ddpm} Ho, J. et al. (2020). Denoising Diffusion Probabilistic Models. NeurIPS 2020.
 \bibitem{google_ddpm} Google. (2020). DDPM CIFAR-10 32x32. Hugging Face.
 \bibitem{fid} Heusel, M. et al. (2017). GANs Trained by a Two Time-Scale Update Rule. NIPS 2017.
+\bibitem{kid} Bi\'nkowski, M. et al. (2018). Demystifying MMD GANs. ICLR 2018.
 \end{thebibliography}
 
 \end{document}

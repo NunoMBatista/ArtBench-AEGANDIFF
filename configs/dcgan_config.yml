@@ -12,9 +12,9 @@ subset_seed: 67
 
 # Model
 model_type: "dcgan"
-latent_dim: 100
-base_channels: 64
-use_spectral_norm: true # Constrains D's Lipschitz constant for better stability
+latent_dim: 64
+base_channels: 128
+use_spectral_norm: false # Constrains D's Lipschitz constant for better stability
 
 # Training
 epochs: 20

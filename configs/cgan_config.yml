@@ -12,15 +12,15 @@ subset_seed: 67
 
 # Model
 model_type: "cgan"
-latent_dim: 100
-base_channels: 64
+latent_dim: 128
+base_channels: 128
 num_classes: 10
 embed_dim: 64
-use_spectral_norm: true
+use_spectral_norm: false
 
 # Training
 epochs: 20
-lr: 0.0002
+lr: 0.00005
 run_prefix: "run_cgan"
 
 # Optimizer (Adam)
@@ -30,7 +30,7 @@ optimizer:
   weight_decay: 0.0
 
 # GAN specific training params
-d_updates_per_g: 1
+d_updates_per_g: 5
 
 # Evaluation
 eval_num_samples: 5000

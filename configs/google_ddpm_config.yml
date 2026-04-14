@@ -21,7 +21,7 @@ disable_attention_on_cpu: false # Avoid known CPU backward crashes in attention 
 
 # Training
 epochs: 200
-lr: 0.0002 # try 0.0002 after (default lr for the other diffusion) # Low LR to avoid catastrophic forgetting on pretrained weights.
+lr: 0.0005 # try 0.0002 after (default lr for the other diffusion) # Low LR to avoid catastrophic forgetting on pretrained weights.
 run_prefix: "run_google_ddpm"
 checkpoint_every_epochs: 5
 
