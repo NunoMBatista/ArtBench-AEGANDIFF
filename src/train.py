@@ -17,7 +17,7 @@ try:
 except ImportError:
     wandb = None
 
-from globals import ensure_repo_root
+from src.globals import ensure_repo_root
 ensure_repo_root()
 load_dotenv()
 
@@ -114,6 +114,7 @@ def run_epoch(
     step_fn: Callable,
     device: torch.device,
     train: bool,
+    epoch: int,
     d_updates_per_g: int = 1,
 ):
 
@@ -137,19 +138,19 @@ def run_epoch(
                 if isinstance(optimizer, dict):
                     # GAN mode: Handle multiple optimizers (D and G)
                     # We pass the optimizers to the step function which handles the internal update logic
-                    loss, metrics = step_fn(model, batch, optimizer, device, train, d_updates_per_g)
+                    loss, metrics = step_fn(model, batch, optimizer, device, train, epoch, d_updates_per_g)
                 else:
                     # Standard mode (VAE)
-                    loss, metrics = step_fn(model, batch, device, train)
+                    loss, metrics = step_fn(model, batch, device, train, epoch)
                     optimizer.zero_grad(set_to_none=True)
                     loss.backward()
                     optimizer.step()
             else:
                 # Evaluation mode
                 if isinstance(optimizer, dict):
-                    loss, metrics = step_fn(model, batch, optimizer, device, train, d_updates_per_g)
+                    loss, metrics = step_fn(model, batch, optimizer, device, train, epoch, d_updates_per_g)
                 else:
-                    loss, metrics = step_fn(model, batch, device, train)
+                    loss, metrics = step_fn(model, batch, device, train, epoch)
 
             batch_size = batch[0].shape[0]
 
@@ -193,7 +194,7 @@ def train_loop(
     for epoch in range(start_epoch, epochs + 1):
         # Run training
         train_loss, train_metrics = run_epoch(
-            model, train_loader, optimizer, step_fn, device, train=True, d_updates_per_g=d_updates_per_g
+            model, train_loader, optimizer, step_fn, device, train=True, epoch=epoch, d_updates_per_g=d_updates_per_g
         )
 
         # Log epoch index, training loss, training metrics and validation loss/metrics if val_loader is provided
@@ -206,7 +207,7 @@ def train_loop(
         # If a validation loader is provided, run validation and log those metrics as well
         if val_loader is not None:
             val_loss, val_metrics = run_epoch(
-                model, val_loader, optimizer, step_fn, device, train=False, d_updates_per_g=d_updates_per_g
+                model, val_loader, optimizer, step_fn, device, train=False, epoch=epoch, d_updates_per_g=d_updates_per_g
             )
             log.update(
                 {
@@ -504,16 +505,25 @@ def get_step_fn(config: Dict) -> Callable:
     model_type = config["model_type"].lower()
     
     if model_type == "vae":
-        beta = config.get("beta", 1.0)
-        def step_fn(model, batch, device, train):
+        target_beta = float(config.get("beta", 1.0))
+        warmup_epochs = int(config.get("kl_warmup_epochs", 0))
+
+        def step_fn(model, batch, device, train, epoch):
+            # KL Annealing: linearly increase beta from 0 to target_beta
+            if warmup_epochs > 0:
+                current_beta = min(target_beta, target_beta * (epoch / warmup_epochs))
+            else:
+                current_beta = target_beta
+
             images, _ = batch
             recon, mu, logvar = model(images)
-            loss, metrics = vae_loss(recon, images, mu, logvar, beta=beta)
+            loss, metrics = vae_loss(recon, images, mu, logvar, beta=current_beta)
+            metrics["current_beta"] = current_beta
             return loss, metrics
         return step_fn
 
     elif model_type == "dcgan":
-        def step_fn(model, batch, optimizers, device, train, d_updates_per_g=1):
+        def step_fn(model, batch, optimizers, device, train, epoch, d_updates_per_g=1):
             images, _ = batch
             batch_size = images.size(0)
             real_label = 1.0
@@ -567,7 +577,7 @@ def get_step_fn(config: Dict) -> Callable:
         return step_fn
 
     elif model_type == "cgan":
-        def step_fn(model, batch, optimizers, device, train, d_updates_per_g=1):
+        def step_fn(model, batch, optimizers, device, train, epoch, d_updates_per_g=1):
             images, labels = batch
             batch_size = images.size(0)
             real_label = 1.0
@@ -623,7 +633,7 @@ def get_step_fn(config: Dict) -> Callable:
     elif model_type == "diffusion":
         class_conditional = bool(config.get("class_conditional", True))
 
-        def step_fn(model, batch, device, train):
+        def step_fn(model, batch, device, train, epoch):
             images, labels = batch
 
             # Diffusion loss is MSE between true and predicted noise at random timesteps.
@@ -632,7 +642,7 @@ def get_step_fn(config: Dict) -> Callable:
         return step_fn
 
     elif model_type == "google_ddpm":
-        def step_fn(model, batch, device, train):
+        def step_fn(model, batch, device, train, epoch):
             images, _labels = batch
             # Unconditional fine-tuning by design for google/ddpm-cifar10-32.
             loss = model(images, y=None)

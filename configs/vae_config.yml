@@ -1,29 +1,28 @@
-seed: 67 # Global random seed for reproducibility.
-model_type: vae # Model type: vae | dcgan | cgan | diffusion.
-epochs: 20 # Number of training epochs.
-batch_size: 256 # Training batch size.
-num_workers: 2 # DataLoader workers.
-lr: 0.002 # Optimizer learning rate.
-latent_dim: 256 # VAE latent dimension size.
-base_channels: 128 # VAE channel width (number of channels in the first conv layer, higher => more capacity).
-beta: 0.5 # Weight on KL term (beta-VAE).
-use_subset: true # Use a subset of the training data.
-subset_mode: random # Subset mode: csv | random.
-subset_csv_path: provided/training_20_percent.csv # CSV with subset indices (csv mode).
-subset_seed: 67 # Seed for random subset sampling.
-subset_fraction: 0.2 # Fraction of training set (random mode, 0-1).
-kaggle_root: data # Path to Kaggle dataset root.
-eval_num_samples: 5000 # Samples for quick eval inside training.
-eval_metrics_batch_size: 32 # Batch size for FID/KID feature extraction.
-device: cpu # Device: cuda | cpu.
-run_prefix: run_vae_very_small # Prefix for outputs folder.
+seed: 67
+model_type: "vae"
+epochs: 50
+batch_size: 128
+num_workers: 2
+lr: 0.0005
+latent_dim: 256
+base_channels: 128
+beta: 0.1
+kl_warmup_epochs: 10
+use_subset: true
+subset_mode: "csv"
+subset_csv_path: "provided/training_20_percent.csv"
+subset_seed: 67
+kaggle_root: "data"
+eval_num_samples: 5000
+eval_metrics_batch_size: 32
+device: "cuda"
+run_prefix: "run_vae_colorful"
 optimizer:
-  name: adam # Optimizer name.
-  betas: [0.9, 0.999] # Adam betas.
-  weight_decay: 0.0 # Optimizer weight decay.
+  name: "adam"
+  betas: [0.9, 0.999]
+  weight_decay: 0.0
 wandb:
   enabled: true
   entity: "nunombatista-university-of-coimbra"
   project: "ArtBench-AEGANDIFF"
-  # run_name: "diffusion-run"
-  tags: ["vae", "artbench"]
+  tags: ["vae", "colorful", "artbench"]
