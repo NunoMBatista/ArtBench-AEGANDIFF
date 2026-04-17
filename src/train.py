@@ -4,6 +4,15 @@ import sys
 from datetime import datetime
 from typing import Callable, Dict, Optional, Tuple, Union
 
+# Allow running as a script: `python src/train.py ...`
+# When executed this way, Python puts `.../src` on sys.path, so `import src.*`
+# would incorrectly look for `.../src/src`. Insert the repo root instead.
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -577,11 +586,17 @@ def get_step_fn(config: Dict) -> Callable:
         return step_fn
 
     elif model_type == "cgan":
+        cgan_sample_fake_labels = bool(config.get("cgan_sample_fake_labels", False))
+        cgan_mismatch_weight = float(config.get("cgan_mismatch_weight", 0.0))
+
         def step_fn(model, batch, optimizers, device, train, epoch, d_updates_per_g=1):
             images, labels = batch
+            labels = labels.long()
             batch_size = images.size(0)
             real_label = 1.0
             fake_label = 0.0
+
+            num_classes = int(getattr(model, "num_classes", config.get("num_classes", 10)))
 
             opt_g = optimizers["opt_g"]
             opt_d = optimizers["opt_d"]
@@ -594,20 +609,43 @@ def get_step_fn(config: Dict) -> Callable:
                     output_real = model.discriminator(images, labels)
                     errD_real = cgan_loss(output_real, label_real)
 
+                    errD_mismatch = None
+                    if cgan_mismatch_weight > 0.0 and batch_size > 1:
+                        # Train D to reject mismatched (real_image, wrong_label) pairs.
+                        wrong_labels = labels.roll(1)
+                        label_mismatch = torch.full((batch_size,), fake_label, device=device)
+                        output_mismatch = model.discriminator(images, wrong_labels)
+                        errD_mismatch = cgan_loss(output_mismatch, label_mismatch)
+
                     noise = torch.randn(batch_size, model.latent_dim, device=device)
-                    fake = model.generator(noise, labels)
+                    fake_labels = (
+                        torch.randint(0, num_classes, (batch_size,), device=device)
+                        if cgan_sample_fake_labels
+                        else labels
+                    )
+                    fake = model.generator(noise, fake_labels)
                     label_fake = torch.full((batch_size,), fake_label, device=device)
-                    output_fake = model.discriminator(fake.detach(), labels)
+                    output_fake = model.discriminator(fake.detach(), fake_labels)
                     errD_fake = cgan_loss(output_fake, label_fake)
 
                     errD = errD_real + errD_fake
+                    if errD_mismatch is not None:
+                        errD = errD + (cgan_mismatch_weight * errD_mismatch)
                     errD.backward()
                     opt_d.step()
                     total_d_loss += errD.item()
 
                 opt_g.zero_grad()
                 label_g = torch.full((batch_size,), real_label, device=device)
-                output_g = model.discriminator(fake, labels)
+
+                noise_g = torch.randn(batch_size, model.latent_dim, device=device)
+                labels_g = (
+                    torch.randint(0, num_classes, (batch_size,), device=device)
+                    if cgan_sample_fake_labels
+                    else labels
+                )
+                fake_g = model.generator(noise_g, labels_g)
+                output_g = model.discriminator(fake_g, labels_g)
                 errG = cgan_loss(output_g, label_g)
                 errG.backward()
                 opt_g.step()

@@ -32,6 +32,12 @@ optimizer:
 # GAN specific training params
 d_updates_per_g: 5
 
+# cGAN training stabilizers
+# - Sample fake labels independently so G/D see all classes uniformly.
+# - Add a mismatch loss so D rejects (real_image, wrong_label) pairs.
+cgan_sample_fake_labels: true
+cgan_mismatch_weight: 1.0
+
 # Evaluation
 eval_num_samples: 5000
 eval_metrics_batch_size: 32
