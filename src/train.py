@@ -593,8 +593,8 @@ def get_step_fn(config: Dict) -> Callable:
             images, labels = batch
             labels = labels.long()
             batch_size = images.size(0)
-            real_label = 1.0
-            fake_label = 0.0
+            real_label = float(config.get("gan_real_label", 1.0))
+            fake_label = float(config.get("gan_fake_label", 0.0))
 
             num_classes = int(getattr(model, "num_classes", config.get("num_classes", 10)))
 

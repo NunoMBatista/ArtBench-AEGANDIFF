@@ -38,6 +38,11 @@ d_updates_per_g: 5
 cgan_sample_fake_labels: true
 cgan_mismatch_weight: 1.0
 
+# GAN label smoothing (optional)
+# One-sided smoothing: use < 1.0 for real labels to reduce D overconfidence.
+gan_real_label: 0.9
+gan_fake_label: 0.0
+
 # Evaluation
 eval_num_samples: 5000
 eval_metrics_batch_size: 32

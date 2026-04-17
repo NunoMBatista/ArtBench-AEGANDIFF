@@ -101,7 +101,6 @@ class Discriminator(nn.Module):
             conv_block(base_channels * 2, base_channels * 4, 4, 2, 1),
             # 4x4 -> 1x1
             nn.Conv2d(base_channels * 4, 1, 4, 1, 0, bias=False),
-            nn.Sigmoid(),
         )
 
     def forward(self, x, labels):
@@ -139,4 +138,5 @@ class cGAN(nn.Module):
 
 
 def cgan_loss(d_out, target):
-    return nn.functional.binary_cross_entropy(d_out.view(-1), target.view(-1))
+    # Discriminator returns logits (no Sigmoid in the model).
+    return nn.functional.binary_cross_entropy_with_logits(d_out.view(-1), target.view(-1))
