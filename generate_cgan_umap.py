@@ -20,6 +20,8 @@ import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
+from scipy.stats import gaussian_kde
 from tqdm import tqdm
 
 try:
@@ -154,29 +156,61 @@ def main():
     real_idx = is_real == 1
     fake_idx = is_real == 0
 
-    scatter_real = ax.scatter(
-        embedding[real_idx, 0], embedding[real_idx, 1],
-        c=all_labels[real_idx], cmap="tab10", vmin=0, vmax=num_classes - 1,
-        s=18, alpha=0.6, marker="o", edgecolors="none",
-    )
-    scatter_fake = ax.scatter(
-        embedding[fake_idx, 0], embedding[fake_idx, 1],
-        c=all_labels[fake_idx], cmap="tab10", vmin=0, vmax=num_classes - 1,
-        s=18, alpha=0.6, marker="s", edgecolors="none",
-    )
+    # Compute global grid bounds once
+    xlo, xhi = embedding[:, 0].min() - 1, embedding[:, 0].max() + 1
+    ylo, yhi = embedding[:, 1].min() - 1, embedding[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.linspace(xlo, xhi, 250), np.linspace(ylo, yhi, 250))
+    grid_pts = np.vstack([xx.ravel(), yy.ravel()])
 
-    # Legend: class colors + real/fake markers
+    for c in range(num_classes):
+        color = cmap(c / max(num_classes - 1, 1))
+
+        real_mask = real_idx & (all_labels == c)
+        fake_mask = fake_idx & (all_labels == c)
+
+        # Scatter points
+        ax.scatter(embedding[real_mask, 0], embedding[real_mask, 1],
+                   color=color, s=18, alpha=0.55, marker="o", edgecolors="none", zorder=4)
+        ax.scatter(embedding[fake_mask, 0], embedding[fake_mask, 1],
+                   color=color, s=18, alpha=0.55, marker="s", edgecolors="none", zorder=4)
+
+        # KDE border — solid for real, dashed for fake
+        # Fill is grey so the colored border is always visible against it.
+        for pts, linestyle, draw_fill in [
+            (embedding[real_mask], "solid", True),
+            (embedding[fake_mask], "--", False),
+        ]:
+            if len(pts) < 10:
+                continue
+            try:
+                kde = gaussian_kde(pts.T, bw_method=0.35)
+                zz = kde(grid_pts).reshape(xx.shape)
+                threshold = np.percentile(kde(pts.T), 15)
+                ax.contour(xx, yy, zz, levels=[threshold],
+                           colors=["black"], linewidths=1.5, linestyles=linestyle,
+                           alpha=0.7, zorder=6)
+                if draw_fill:
+                    ax.contourf(xx, yy, zz, levels=[threshold, zz.max()],
+                                colors=[color], alpha=0.10, zorder=2)
+            except Exception:
+                pass
+
+    # Legend: class colours + marker/line type guide
     class_handles = [
-        mpatches.Patch(color=cmap(i / (num_classes - 1)), label=class_names[i])
+        mpatches.Patch(color=cmap(i / max(num_classes - 1, 1)), label=class_names[i])
         for i in range(num_classes)
     ]
-    marker_handles = [
-        plt.Line2D([0], [0], marker="o", color="w", markerfacecolor="gray", markersize=8, label="Real"),
-        plt.Line2D([0], [0], marker="s", color="w", markerfacecolor="gray", markersize=8, label="Fake"),
+    type_handles = [
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="gray",
+               markersize=8, label="Real (circle / solid border)"),
+        Line2D([0], [0], marker="s", color="w", markerfacecolor="gray",
+               markersize=8, label="Fake (square / dashed border)"),
     ]
-    legend1 = ax.legend(handles=class_handles, title="Class", bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=8)
+    legend1 = ax.legend(handles=class_handles, title="Class",
+                        bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=8)
     ax.add_artist(legend1)
-    ax.legend(handles=marker_handles, title="Type", bbox_to_anchor=(1.01, 0.3), loc="upper left", fontsize=9)
+    ax.legend(handles=type_handles, title="Type",
+              bbox_to_anchor=(1.01, 0.28), loc="upper left", fontsize=8)
 
     ax.set_title(args.title, fontsize=14)
     ax.set_xlabel("UMAP-1")

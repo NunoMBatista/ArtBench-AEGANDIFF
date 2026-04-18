@@ -1,9 +1,14 @@
 """
-UMAP visualization of a VAE's latent space (mu vectors), colored by class.
-Each class appears as a distinct cluster.
+UMAP of VAE reconstructions in Inception V3 feature space.
+
+For each real image (with known class label):
+  1. Encode through VAE -> mu
+  2. Decode mu -> reconstruction
+  3. Extract 2048-dim Inception V3 pool features
+  4. UMAP + KDE soft class borders
 
 Usage:
-    python generate_vae_umap.py [--ckpt PATH] [--out PATH] [--num_samples 5000]
+    python generate_vae_inception_umap.py [--ckpt PATH] [--out PATH] [--num_samples 5000]
 """
 import os
 import sys
@@ -17,9 +22,12 @@ for p in (src_path, project_root):
 import argparse
 import numpy as np
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+from torchvision.models import inception_v3, Inception_V3_Weights
+from torchvision.transforms import Resize
 from scipy.stats import gaussian_kde
+from tqdm import tqdm
 
 try:
     import umap
@@ -38,24 +46,46 @@ ARTBENCH_CLASSES = [
 ]
 
 
-def encode_in_batches(vae, images, device, batch_size=128):
+def build_inception_extractor(device):
+    model = inception_v3(weights=Inception_V3_Weights.DEFAULT)
+    model.fc = nn.Identity()
+    model.aux_logits = False
+    model = model.to(device).eval()
+    return model, Resize((299, 299), antialias=True)
+
+
+def extract_inception_features(images, inception, resize, device, batch_size=64):
+    """images: (N, C, H, W) tensor in [-1, 1]. Returns (N, 2048) numpy array."""
+    feats = []
+    with torch.no_grad():
+        for i in tqdm(range(0, images.size(0), batch_size), desc="Inception features"):
+            batch = images[i:i + batch_size].to(device)
+            batch = (batch + 1.0) / 2.0          # [-1,1] -> [0,1]
+            batch = resize(batch)                  # -> 299x299
+            feats.append(inception(batch).cpu().numpy())
+    return np.concatenate(feats, axis=0)
+
+
+def reconstruct_through_vae(vae, images, device, batch_size=128):
+    """Encode then decode each image; returns tensor same shape as input."""
     vae.eval()
-    mus = []
+    recons = []
     with torch.no_grad():
         for i in range(0, images.size(0), batch_size):
             batch = images[i:i + batch_size].to(device)
             mu, _ = vae.encode(batch)
-            mus.append(mu.cpu().numpy())
-    return np.concatenate(mus, axis=0)
+            recon = vae.decode(mu)               # use mu directly (no noise)
+            recons.append(recon.cpu())
+    return torch.cat(recons, dim=0)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ckpt", type=str, default="")
-    parser.add_argument("--run_prefix", type=str, default="vae", help="Prefix for auto checkpoint discovery")
+    parser.add_argument("--run_prefix", type=str, default="vae")
     parser.add_argument("--num_samples", type=int, default=5000)
-    parser.add_argument("--out", type=str, default="docs/report/images/umap_vae.png")
-    parser.add_argument("--title", type=str, default="VAE Latent Space (μ) — UMAP by Class")
+    parser.add_argument("--out", type=str, default="docs/report/images/umap_vae_inception.png")
+    parser.add_argument("--title", type=str, default="VAE Reconstructions — Inception Features UMAP by Class")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -73,7 +103,7 @@ def main():
     print(f"Using checkpoint: {ckpt_path}")
     config.update(ckpt_path)
 
-    model = _load_model("vae", ckpt_path, config.latent_dim, config.base_channels, device)
+    vae = _load_model("vae", ckpt_path, config.latent_dim, config.base_channels, device)
 
     # Load real images with labels
     print("Loading real images...")
@@ -99,40 +129,41 @@ def main():
     images = torch.cat(images, dim=0)[:args.num_samples]
     labels_np = torch.cat(labels, dim=0)[:args.num_samples].numpy()
 
-    # Encode to latent space
-    print("Encoding images to latent space...")
-    mu_vectors = encode_in_batches(model, images, device)
+    # Reconstruct through VAE
+    print("Reconstructing images through VAE...")
+    reconstructions = reconstruct_through_vae(vae, images, device)
 
-    # Filter out any NaN rows (can occur with beta=0 due to no KL regularization)
-    valid_mask = np.isfinite(mu_vectors).all(axis=1)
-    n_dropped = (~valid_mask).sum()
+    # Extract Inception features from reconstructions
+    print("Loading Inception V3...")
+    inception, resize = build_inception_extractor(device)
+    features = extract_inception_features(reconstructions, inception, resize, device)
+
+    # Filter NaN/Inf rows
+    valid = np.isfinite(features).all(axis=1)
+    n_dropped = (~valid).sum()
     if n_dropped > 0:
-        print(f"Warning: dropping {n_dropped} samples with NaN/Inf in latent space.")
-    mu_vectors = mu_vectors[valid_mask]
-    labels_np = labels_np[valid_mask]
+        print(f"Dropping {n_dropped} samples with NaN/Inf in Inception features.")
+    features = features[valid]
+    labels_np = labels_np[valid]
 
-    # Run UMAP
+    # UMAP
     print("Running UMAP...")
     reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric="euclidean", random_state=42)
-    embedding = reducer.fit_transform(mu_vectors)
+    embedding = reducer.fit_transform(features)
 
     # Plot
     num_classes = len(class_names)
     cmap = plt.get_cmap("tab10")
-
     fig, ax = plt.subplots(figsize=(11, 9))
+
     for c in range(num_classes):
         mask = labels_np == c
         pts = embedding[mask]
         color = cmap(c / max(num_classes - 1, 1))
 
-        ax.scatter(
-            pts[:, 0], pts[:, 1],
-            color=color, s=12, alpha=0.65, edgecolors="none", label=class_names[c],
-        )
+        ax.scatter(pts[:, 0], pts[:, 1],
+                   color=color, s=12, alpha=0.65, edgecolors="none", label=class_names[c])
 
-        # KDE soft boundary — contour drawn at the density level that encloses
-        # ~85% of the class points, so outliers fall outside the border naturally.
         if len(pts) >= 10:
             try:
                 kde = gaussian_kde(pts.T, bw_method=0.35)
@@ -149,10 +180,8 @@ def main():
             except Exception:
                 pass
 
-    legend = ax.legend(
-        title="Class", bbox_to_anchor=(1.01, 1), loc="upper left",
-        fontsize=9, title_fontsize=10, markerscale=2,
-    )
+    ax.legend(title="Class", bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=9,
+              title_fontsize=10, markerscale=2)
     ax.set_title(args.title, fontsize=14)
     ax.set_xlabel("UMAP-1")
     ax.set_ylabel("UMAP-2")

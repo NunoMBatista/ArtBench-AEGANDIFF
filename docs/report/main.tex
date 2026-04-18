@@ -356,6 +356,24 @@ Crucially, this behavior cannot be attributed to posterior collapse (where the e
     \label{fig:umap_vae_both}
 \end{figure}
 
+\paragraph{cGAN Class-Wise Mode Collapse.}
+To diagnose the cGAN's failure mode, we trained two configurations and visualized the discriminator's internal feature space via UMAP (Figure \ref{fig:umap_cgan_both}). Features are extracted from the penultimate layer of the discriminator, which receives both the image and its class label as input, so the representation captures what the discriminator considers jointly realistic. Real images are shown as circles and generated images as squares, both colored by class. KDE soft boundaries (enclosing $\approx$85\% of each class's points) are drawn with solid lines for real and dashed lines for fake.
+
+The \textbf{collapsed} configuration (\texttt{d\_updates\_per\_g}=1, mismatch weight $\lambda=0.2$) shows tightly packed fake clusters that do not spread across the real distribution: the generator has found a per-class fixed point that superficially fools the discriminator without covering the true intra-class diversity. The solid (real) and dashed (fake) KDE borders for each class barely overlap, confirming that generated samples occupy a degenerate subregion of each class's real manifold.
+
+The \textbf{stable} configuration (\texttt{d\_updates\_per\_g}=5, $\lambda=1.0$) shows substantially higher cluster-wise variance in the fake distribution: the dashed KDE borders spread further and overlap more with the corresponding real borders, indicating the generator has been pushed to explore the full intra-class diversity rather than collapsing to a single mode. Two complementary mechanisms drove this improvement. First, increasing \texttt{d\_updates\_per\_g} to 5 gives the discriminator more signal per generator step, making it harder for the generator to find and exploit a degenerate fixed point. Second, raising the mismatch loss weight $\lambda$ to 1.0 penalizes the discriminator heavily for accepting real images paired with wrong labels, forcing it to learn genuinely class-discriminative features rather than settling for class-agnostic realism cues---and by extension forcing the generator to produce images that are class-specifically realistic rather than generically plausible.
+
+\begin{figure}[H]
+    \centering
+    \begin{tabular}{cc}
+        \includegraphics[width=0.48\textwidth]{images/umap_cgan_stable.png} &
+        \includegraphics[width=0.48\textwidth]{images/umap_cgan_collapse.png}
+    \end{tabular}
+    \vspace{-0.2cm}
+    \caption{UMAP of discriminator features (5,000 real + 5,000 fake samples) for the stable cGAN (left) and the collapsed cGAN (right). Circles = real, squares = fake; solid KDE border = real cluster, dashed = fake cluster. In the stable run, fake borders spread wider and overlap more with their real counterparts, indicating higher intra-class diversity. In the collapsed run, fake clusters are degenerate and misaligned with the real distribution.}
+    \label{fig:umap_cgan_both}
+\end{figure}
+
 \paragraph{Why Google DDPM can look better but score worse.}
 FID and KID evaluate distributional similarity in a fixed Inception feature space rather than directly measuring perceived coherence \cite{fid}. The fine-tuned Google DDPM starts from a CIFAR-10 prior that encodes photographic structure; after fine-tuning on ArtBench, it generates structurally coherent images, but their visual character remains closer to natural photographs than to paintings. This stylistic misalignment is precisely what FID/KID penalize: the generated distribution diverges from the ArtBench painting statistics in texture and style cues, while human observers reward the structural plausibility. In addition, a model may produce high-quality samples while under-covering modes (reduced diversity), which is penalized by distribution-level metrics even when qualitative grids appear strong.
 
