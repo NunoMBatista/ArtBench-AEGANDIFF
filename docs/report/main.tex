@@ -338,6 +338,24 @@ Our results highlight several key trade-offs:
     \item \textbf{VAE smoothness:} VAEs optimized with an $L2$-style reconstruction loss optimize for the mean: when multiple high-frequency outcomes are plausible, the decoder is rewarded for predicting an average, which tends to wash out texture and contrast. This effect belongs to the model/loss combination (not a single sweep knob), and helps explain the extremely smooth samples, that loosely capture the global brownish color palette of the dataset but entirely lack fine detail.
 \end{itemize}
 
+\paragraph{VAE Latent Space Analysis.}
+To investigate the structure learned by the VAE encoder, we trained two variants and visualized their latent spaces via UMAP \cite{umap} using 5,000 encoded training images (Figure \ref{fig:umap_vae_both}). The first variant uses $\beta=1$ (standard VAE), where we expected the KL regularizer to align the aggregate posterior with an isotropic Gaussian prior; the second uses $\beta=0$, effectively turning the model into a deterministic autoencoder with no regularization pressure on the latent space. Without any KL penalty, the encoder is free to allocate latent dimensions arbitrarily, so we expected it to exploit the extra freedom to push each class into a distinct, tight cluster.
+
+Both visualizations turned out to be relatively unstructured, with no clearly separable class clusters in either setting. We hypothesize that the core issue lies in the information bottleneck being too narrow for the complexity of ArtBench-10. A 32$\times$32 painting contains fine stylistic cues---brushstroke texture, palette distribution, compositional motifs---that are specific to each artistic style. Compressing this into a 256-dimensional bottleneck forces the encoder to ruthlessly prioritize low-frequency shape and global color, which are largely shared across styles, at the expense of the class-discriminative high-frequency details. The resulting latent vectors therefore all look similar to UMAP regardless of the class label: the encoder has only retained the information that is common to all classes.
+
+Crucially, this behavior cannot be attributed to posterior collapse (where the encoder ignores the input entirely and the KL term forces $q_\phi(z|x) \approx p(z)$), since the $\beta=0$ run disables the KL term entirely, yet still produces an unstructured latent space. The bottleneck capacity, rather than the regularization strength, appears to be the binding constraint.
+
+\begin{figure}[H]
+    \centering
+    \begin{tabular}{cc}
+        \includegraphics[width=0.48\textwidth]{images/umap_vae_beta0.png} &
+        \includegraphics[width=0.48\textwidth]{images/umap_vae_beta1.png}
+    \end{tabular}
+    \vspace{-0.2cm}
+    \caption{UMAP projections of the VAE latent space (5,000 samples, colored by class) for $\beta=0$ (left) and $\beta=1$ (right). KDE soft boundaries enclose $\approx$85\% of each class's points. Neither configuration produces clearly separated class clusters, suggesting the bottleneck discards class-discriminative information rather than retaining it.}
+    \label{fig:umap_vae_both}
+\end{figure}
+
 \paragraph{Why Google DDPM can look better but score worse.}
 FID and KID evaluate distributional similarity in a fixed Inception feature space rather than directly measuring perceived coherence \cite{fid}. The fine-tuned Google DDPM starts from a CIFAR-10 prior that encodes photographic structure; after fine-tuning on ArtBench, it generates structurally coherent images, but their visual character remains closer to natural photographs than to paintings. This stylistic misalignment is precisely what FID/KID penalize: the generated distribution diverges from the ArtBench painting statistics in texture and style cues, while human observers reward the structural plausibility. In addition, a model may produce high-quality samples while under-covering modes (reduced diversity), which is penalized by distribution-level metrics even when qualitative grids appear strong.
 
@@ -355,6 +373,7 @@ This project utilized ArtBench-10 (Kaggle). We used the \texttt{diffusers} libra
 \bibitem{google_ddpm} Google. (2020). DDPM CIFAR-10 32x32. Hugging Face.
 \bibitem{fid} Heusel, M. et al. (2017). GANs Trained by a Two Time-Scale Update Rule. NIPS 2017.
 \bibitem{kid} Bi\'nkowski, M. et al. (2018). Demystifying MMD GANs. ICLR 2018.
+\bibitem{umap} McInnes, L. et al. (2018). UMAP: Uniform Manifold Approximation and Projection. arXiv:1802.03426.
 \end{thebibliography}
 
 \end{document}
