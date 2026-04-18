@@ -36,7 +36,7 @@ from src.models.cGAN import cGAN, cgan_loss
 from src.models.diffusion import DiffusionModel
 from src.models.google_DDPM import GoogleDDPMFineTuner
 from src.utils.data_loader import get_dataloaders
-from src.utils.metrics import compute_fid_kid
+from src.utils.metrics import compute_fid_kid, compute_inception_score
 from src.utils.seed_setter import set_global_seed
 
 
@@ -372,6 +372,12 @@ def _compute_fid_kid_metrics(
         batch_size=metrics_batch_size,
     )
 
+    is_mean, is_std = compute_inception_score(
+        fake_images,
+        device=device,
+        batch_size=metrics_batch_size,
+    )
+
     if was_training:
         model.train()
 
@@ -379,6 +385,8 @@ def _compute_fid_kid_metrics(
         "fid": float(fid),
         "kid_mean": float(kid_mean),
         "kid_std": float(kid_std),
+        "is_mean": float(is_mean),
+        "is_std": float(is_std),
     }
 
 

@@ -274,20 +274,25 @@ Table \ref{tab:quantitative_results} presents the results of the 10-seed evaluat
 \begin{table}[h]
 \centering
 \caption{Quantitative results (Mean $\pm$ Std Dev) across 10 random seeds for the 20\% subset and the full dataset (100\%).}\label{tab:quantitative_results}
-\begin{tabular}{lcccc}
+\begin{tabular}{lccccc}
 \toprule
- & \multicolumn{2}{c}{\textbf{20\% Subset}} & \multicolumn{2}{c}{\textbf{Full Dataset}} \\
+ & \multicolumn{2}{c}{\textbf{20\% Subset}} & \multicolumn{2}{c}{\textbf{Full Dataset}} & \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-5}
-\textbf{Model} & \textbf{FID $\downarrow$} & \textbf{KID ($\times 10^{-3}$) $\downarrow$} & \textbf{FID $\downarrow$} & \textbf{KID ($\times 10^{-3}$) $\downarrow$} \\ \midrule
-VAE & $347.52 \pm 0.73$ & $336.1 \pm 1.4$ & $355.26 \pm 1.32$ & $370.3 \pm 4.0$ \\
-DCGAN & $\mathbf{121.87 \pm 0.70}$ & $\mathbf{90.9 \pm 1.2}$ & $91.02 \pm 0.65$ & $69.0 \pm 1.5$ \\
-cGAN & $301.88 \pm 0.81$ & $258.4 \pm 1.7$ & $393.68 \pm 1.36$ & $329.1 \pm 2.6$ \\
-Diffusion & $176.58 \pm 1.64$ & $120.7 \pm 2.8$ & $\mathbf{43.03 \pm 0.51}$ & $\mathbf{26.7 \pm 1.0}$ \\
-Google DDPM & $122.82 \pm 1.30$ & $121.3 \pm 2.5$ & $97.49 \pm 1.26$ & $90.5 \pm 1.5$ \\ \bottomrule
+\textbf{Model} & \textbf{FID $\downarrow$} & \textbf{KID ($\times 10^{-3}$) $\downarrow$} & \textbf{FID $\downarrow$} & \textbf{KID ($\times 10^{-3}$) $\downarrow$} & \textbf{IS $\uparrow$} \\ \midrule
+VAE         & $347.52 \pm 0.73$ & $336.1 \pm 1.4$ & $355.26 \pm 1.32$ & $370.3 \pm 4.0$ & $1.90 \pm 0.05$ \\
+DCGAN       & $\mathbf{121.87 \pm 0.70}$ & $\mathbf{90.9 \pm 1.2}$ & $91.02 \pm 0.65$ & $69.0 \pm 1.5$ & $3.15 \pm 0.10$ \\
+cGAN        & $301.88 \pm 0.81$ & $258.4 \pm 1.7$ & $393.68 \pm 1.36$ & $329.1 \pm 2.6$ & $2.10 \pm 0.04$ \\
+Diffusion   & $176.58 \pm 1.64$ & $120.7 \pm 2.8$ & $\mathbf{43.03 \pm 0.51}$ & $\mathbf{26.7 \pm 1.0}$ & $\mathbf{4.00 \pm 0.16}$ \\
+Google DDPM & $122.82 \pm 1.30$ & $121.3 \pm 2.5$ & $97.49 \pm 1.26$ & $90.5 \pm 1.5$ & $2.89 \pm 0.08$ \\ \bottomrule
 \end{tabular}
 \end{table}
 
 On the full dataset, FID and KID rankings are in perfect agreement across all five models, and per-seed standard deviations are small relative to mean values (e.g., FID std of $0.51$ for TinyUNet, $0.65$ for DCGAN), confirming the stability of both the models and the evaluation protocol. The large gap between TinyUNet ($\text{FID}=43.03$) and the next best model DCGAN ($\text{FID}=91.02$) underscores the advantage of diffusion-based objectives on this dataset.
+
+\paragraph{Inception Score.}
+The Inception Score (IS) \cite{is} measures two complementary properties of a generative model's output distribution: \emph{objectness} (each generated image should be confidently classifiable into some category, i.e., the conditional label distribution $p(y|x)$ should have low entropy) and \emph{diversity} (the marginal $p(y)$ should be spread across many categories, i.e., high entropy). Higher IS is better. IS is computed on fake images only, using a pretrained Inception V3 classifier, and is therefore independent of the real data distribution.
+
+The IS ranking (Table \ref{tab:quantitative_results}) largely agrees with FID/KID: TinyUNet Diffusion leads ($4.00 \pm 0.16$), followed by DCGAN ($3.15 \pm 0.10$), Google DDPM ($2.89 \pm 0.08$), cGAN ($2.10 \pm 0.04$), and VAE ($1.90 \pm 0.05$). The VAE's near-floor score reflects the blurry, low-contrast outputs that the Inception classifier cannot confidently assign to any style. The cGAN scores only marginally above the VAE despite its conditioning mechanism, consistent with its per-class mode collapse producing coherent-looking but non-diverse outputs. Note that IS scores on $32\times32$ images are inherently lower than those reported on higher-resolution benchmarks (e.g., ImageNet), since the Inception classifier's softmax confidences decrease with lower-resolution inputs.
 
 On the 20\% subset, the ranking shifts notably: DCGAN achieves the best KID ($90.9 \pm 1.2 \times 10^{-3}$) and the best FID ($121.87$), with Google DDPM close behind ($\text{FID}=122.82$). Diffusion (TinyUNet) ranks third by FID ($176.58$) despite dominating on the full dataset, suggesting that data volume is a stronger determinant of diffusion model quality than for GANs. The relative ordering of VAE and cGAN remains poor in both settings, though cGAN shows a notable relative improvement on the subset ($\text{FID}=301.88$ vs.\ $393.68$ on the full dataset), which indicates less severe mode collapse when the per-class data distribution is smaller.
 
@@ -337,6 +342,9 @@ Our results highlight several key trade-offs:
     \item \textbf{Perceptual Quality:} While TinyUNet Diffusion achieved the lowest global FID, the fine-tuned Google DDPM produced the most coherent samples by visual inspection despite a higher FID. Additionally, despite good FID and producing samples with visible texture and good color diversity, DCGAN samples suffer from checkerboard noise, worsening its perceived quality. These findings highlight that metrics do not always align with human perception of quality.
     \item \textbf{VAE smoothness:} VAEs optimized with an $L2$-style reconstruction loss optimize for the mean: when multiple high-frequency outcomes are plausible, the decoder is rewarded for predicting an average, which tends to wash out texture and contrast. This effect belongs to the model/loss combination (not a single sweep knob), and helps explain the extremely smooth samples, that loosely capture the global brownish color palette of the dataset but entirely lack fine detail.
 \end{itemize}
+
+\paragraph{Inception Score as a Complementary Proxy.}
+FID and KID measure the distance between the generated and real \emph{distributions} in Inception feature space: they penalize both low fidelity and low coverage, but they cannot separate the two failure modes. IS is useful precisely because it is distribution-free on the real side: it measures only what the generator produces, asking whether samples are visually coherent enough for a classifier to recognize them and diverse enough to cover many categories. For $32\times32$ images this property is especially valuable because FID/KID operate on upsampled $299\times299$ features, introducing interpolation artifacts that can distort the distance estimate; IS operates on the classifier's final softmax, which is more robust to resolution. A model that achieves low FID by generating blurry averages of the real distribution will be penalized by IS (low objectness), while a model that achieves high IS by generating a small number of very sharp but identical images will be penalized by FID/KID (low diversity/coverage). Together the three metrics triangulate sample quality, diversity, and distributional fidelity from different angles.
 
 \paragraph{VAE Latent Space Analysis.}
 To investigate the structure learned by the VAE encoder, we trained two variants and visualized their latent spaces via UMAP \cite{umap} using 5,000 encoded training images (Figure \ref{fig:umap_vae_both}). The first variant uses $\beta=1$ (standard VAE), where we expected the KL regularizer to align the aggregate posterior with an Gaussian prior; the second uses $\beta=0$, effectively turning the model into a deterministic autoencoder with no regularization pressure on the latent space. Without any KL penalty, the encoder is free to allocate latent dimensions arbitrarily, so we expected it to exploit the extra freedom to push each class into a distinct, tight cluster.
@@ -392,6 +400,7 @@ This project utilized ArtBench-10 (Kaggle). We used the \texttt{diffusers} libra
 \bibitem{fid} Heusel, M. et al. (2017). GANs Trained by a Two Time-Scale Update Rule. NIPS 2017.
 \bibitem{kid} Bi\'nkowski, M. et al. (2018). Demystifying MMD GANs. ICLR 2018.
 \bibitem{umap} McInnes, L. et al. (2018). UMAP: Uniform Manifold Approximation and Projection. arXiv:1802.03426.
+\bibitem{is} Salimans, T. et al. (2016). Improved Techniques for Training GANs. NeurIPS 2016.
 \end{thebibliography}
 
 \end{document}

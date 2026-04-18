@@ -6,6 +6,7 @@ from tqdm import tqdm
 
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.kid import KernelInceptionDistance
+from torchmetrics.image.inception import InceptionScore
 
 def _to_torch_images(images: np.ndarray) -> torch.Tensor:
     # This function converts a numpy array of images to a torch tensor, ensure (C x H x W) format and normalized to [0, 1].
@@ -82,3 +83,24 @@ def compute_fid_kid(
     fid = float(fid_metric.compute().item())
     kid_mean, kid_std = kid_metric.compute()
     return fid, float(kid_mean.item()), float(kid_std.item())
+
+
+def compute_inception_score(
+    fake_images: np.ndarray,
+    device=None,
+    batch_size: int = 64,
+) -> Tuple[float, float]:
+    """Compute Inception Score (mean, std) on fake images only."""
+    dev = torch.device(device) if device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    fake = _to_torch_images(fake_images)
+
+    is_metric = InceptionScore(normalize=True).to(dev)
+
+    with tqdm(total=fake.shape[0], desc="IS fake", unit="img") as pbar:
+        for start in range(0, fake.shape[0], batch_size):
+            batch = fake[start:start + batch_size].to(dev)
+            is_metric.update(batch)
+            pbar.update(batch.shape[0])
+
+    is_mean, is_std = is_metric.compute()
+    return float(is_mean.item()), float(is_std.item())
