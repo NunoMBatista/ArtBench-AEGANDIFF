@@ -6,8 +6,8 @@ num_workers: 2
 lr: 0.0005
 latent_dim: 256
 base_channels: 128
-beta: 1
-kl_warmup_epochs: 10
+beta: 0
+kl_warmup_epochs: 0
 use_subset: true
 subset_mode: "csv"
 subset_csv_path: "provided/training_20_percent.csv"
@@ -16,7 +16,7 @@ kaggle_root: "data"
 eval_num_samples: 5000
 eval_metrics_batch_size: 32
 device: "cuda"
-run_prefix: "run_vae_colorful"
+run_prefix: "run_vae_beta0"
 optimizer:
   name: "adam"
   betas: [0.9, 0.999]
@@ -25,4 +25,4 @@ wandb:
   enabled: true
   entity: "nunombatista-university-of-coimbra"
   project: "ArtBench-AEGANDIFF"
-  tags: ["vae", "colorful", "artbench"]
+  tags: ["vae", "beta0", "artbench"]

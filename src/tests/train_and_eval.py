@@ -224,7 +224,7 @@ def plot_results(all_results: Dict[str, List[Dict]], out_dir: str, dataset_label
         axes,
         [fid_by_model, kid_by_model],
         ["FID ↓", "KID ↓"],
-        [".1f", ".3f"],
+        [".2f", ".4f"],
     ):
         means = np.array([np.mean(scores_by_model[m]) for m in model_names])
         stds = np.array([np.std(scores_by_model[m]) for m in model_names])

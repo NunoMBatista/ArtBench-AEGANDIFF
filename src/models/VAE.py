@@ -54,7 +54,7 @@ class VAE(nn.Module):
         return mu, logvar
 
     def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        std = torch.exp(0.5 * logvar)
+        std = torch.exp(0.5 * logvar.clamp(-10, 10))
         eps = torch.randn_like(std)
         return mu + eps * std
 
@@ -81,14 +81,18 @@ def vae_loss(
 ):
     # Mirror the friend's stable math: sum then divide ONLY by batch size.
     batch_size = x.size(0)
-    
+
     recon_loss_sum = F.mse_loss(recon, x, reduction="sum")
-    kl_loss_sum = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-
     recon_loss = recon_loss_sum / batch_size
-    kl_loss = kl_loss_sum / batch_size
 
-    total = recon_loss + beta * kl_loss
+    # Skip KL entirely when beta=0 to avoid 0*inf=nan (IEEE 754) when logvar overflows.
+    if beta == 0.0:
+        kl_loss = recon_loss.new_zeros(())
+        total = recon_loss
+    else:
+        kl_loss_sum = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        kl_loss = kl_loss_sum / batch_size
+        total = recon_loss + beta * kl_loss
     
     return total, {
         "recon_loss": float(recon_loss.item()),

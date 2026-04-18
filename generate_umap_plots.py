@@ -146,6 +146,7 @@ def main():
     try:
         dcgan_ckpt = args.dcgan_ckpt or _find_latest_checkpoint("dcgan")
         print(f"Using DCGAN checkpoint: {dcgan_ckpt}")
+        config.update(dcgan_ckpt)
         dcgan = _load_model("dcgan", dcgan_ckpt, config.latent_dim, config.base_channels, device, use_spectral_norm=config.use_spectral_norm)
         
         with torch.no_grad():
@@ -165,10 +166,11 @@ def main():
     try:
         diff_ckpt = args.diff_ckpt or _find_latest_checkpoint("diffusion")
         print(f"Using Diffusion checkpoint: {diff_ckpt}")
+        config.update(diff_ckpt)
         if args.no_attention:
             print("Disabling attention for Diffusion model load...")
             config.use_attention = False
-        
+
         diff_model = _load_model(
             "diffusion", diff_ckpt, config.latent_dim, config.base_channels, device,
             image_size=config.image_size, img_channels=config.img_channels, num_classes=config.num_classes,

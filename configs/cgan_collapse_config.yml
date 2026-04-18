@@ -21,7 +21,7 @@ use_spectral_norm: false
 # Training
 epochs: 20
 lr: 0.00005
-run_prefix: "run_cgan"
+run_prefix: "run_cgan_collapse"
 
 # Optimizer (Adam)
 optimizer:
@@ -30,16 +30,13 @@ optimizer:
   weight_decay: 0.0
 
 # GAN specific training params
-d_updates_per_g: 5
+d_updates_per_g: 1
 
-# cGAN training stabilizers
-# - Sample fake labels independently so G/D see all classes uniformly.
-# - Add a mismatch loss so D rejects (real_image, wrong_label) pairs.
+# cGAN training stabilizers — intentionally weak to reproduce class-wise mode collapse
 cgan_sample_fake_labels: true
-cgan_mismatch_weight: 1
+cgan_mismatch_weight: 0.2
 
-# GAN label smoothing (optional)
-# One-sided smoothing: use < 1.0 for real labels to reduce D overconfidence.
+# GAN label smoothing
 gan_real_label: 0.9
 gan_fake_label: 0.0
 

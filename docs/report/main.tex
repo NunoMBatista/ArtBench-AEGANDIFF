@@ -291,43 +291,43 @@ On the full dataset, FID and KID rankings are in perfect agreement across all fi
 
 On the 20\% subset, the ranking shifts notably: DCGAN achieves the best KID ($90.9 \pm 1.2 \times 10^{-3}$) and the best FID ($121.87$), with Google DDPM close behind ($\text{FID}=122.82$). Diffusion (TinyUNet) ranks third by FID ($176.58$) despite dominating on the full dataset, suggesting that data volume is a stronger determinant of diffusion model quality than for GANs. The relative ordering of VAE and cGAN remains poor in both settings, though cGAN shows a notable relative improvement on the subset ($\text{FID}=301.88$ vs.\ $393.68$ on the full dataset), which indicates less severe mode collapse when the per-class data distribution is smaller.
 
-\subsection{Training Dynamics}
-Loss curves measured over training across 10 seeds for the full dataset(Figure \ref{fig:loss_curves}) highlight different optimization behavior across model families:
+% \subsection{Training Dynamics}
+% Loss curves measured over training across 10 seeds for the full dataset(Figure \ref{fig:loss_curves}) highlight different optimization behavior across model families:
 
-\begin{itemize}
-    \item \textbf{DCGAN:} Loss drops sharply in the first few epochs and stabilizes, indicating a relatively balanced adversarial equilibrium consistent with its competitive FID.
-    \item \textbf{cGAN:} Loss increases monotonically throughout training ($\sim$5 to $\sim$7.5) with a widening confidence band across seeds, indicating progressive divergence. This directly correlates with cGAN's poor FID of 393.68.
-    \item \textbf{VAE:} Exhibits a transient spike near epoch 7-8 (rising to $\sim$0.4 before recovering to $\sim$0.1), with a wide per-seed confidence band indicating the instability occurs at different epochs across runs. Training ultimately stabilizes.
-    \item \textbf{Diffusion (TinyUNet):} Noise-prediction MSE decreases smoothly and reproducibly, with a near-zero confidence band, reflecting a supervised regression-style objective \cite{ddpm}. This stability correlates with the best observed FID.
-    \item \textbf{Google DDPM:} Starts from an already low loss ($\sim$0.033) due to pretraining on CIFAR-10, and fine-tunes gradually. Despite the lower absolute loss values, it achieves a worse FID (97.49) than the from-scratch TinyUNet, suggesting domain mismatch rather than optimization failure.
-\end{itemize}
+% \begin{itemize}
+%     \item \textbf{DCGAN:} Loss drops sharply in the first few epochs and stabilizes, indicating a relatively balanced adversarial equilibrium consistent with its competitive FID.
+%     \item \textbf{cGAN:} Loss increases monotonically throughout training ($\sim$5 to $\sim$7.5) with a widening confidence band across seeds, indicating progressive divergence. This directly correlates with cGAN's poor FID of 393.68.
+%     \item \textbf{VAE:} Exhibits a transient spike near epoch 7-8 (rising to $\sim$0.4 before recovering to $\sim$0.1), with a wide per-seed confidence band indicating the instability occurs at different epochs across runs. Training ultimately stabilizes.
+%     \item \textbf{Diffusion (TinyUNet):} Noise-prediction MSE decreases smoothly and reproducibly, with a near-zero confidence band, reflecting a supervised regression-style objective \cite{ddpm}. This stability correlates with the best observed FID.
+%     \item \textbf{Google DDPM:} Starts from an already low loss ($\sim$0.033) due to pretraining on CIFAR-10, and fine-tunes gradually. Despite the lower absolute loss values, it achieves a worse FID (97.49) than the from-scratch TinyUNet, suggesting domain mismatch rather than optimization failure.
+% \end{itemize}
 
-\begin{figure}[h]
-    \centering
-    \includegraphics[width=1\textwidth]{images/loss_curves.png}
-    \caption{Training loss curves (mean $\pm$ std over 10 training seeds) for all five model families.}\label{fig:loss_curves}
-\end{figure}
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=1\textwidth]{images/loss_curves.png}
+%     \caption{Training loss curves (mean $\pm$ std over 10 training seeds) for all five model families.}\label{fig:loss_curves}
+% \end{figure}
 
-\subsection{Visualizing Model Dynamics}
-To further analyze the internal behavior of the best-performing models, we visualize their generative processes.
+% \subsection{Visualizing Model Dynamics}
+% To further analyze the internal behavior of the best-performing models, we visualize their generative processes.
 
-\paragraph{Diffusion Denoising Process.} Figure \ref{fig:diffusion_denoising} displays the iterative denoising process of our TinyUNet model. Starting from pure Gaussian noise (top-left), the model progressively removes noise over 100 DDIM steps to ``crystallize'' a coherent painting. This visualization demonstrates the model's ability to transition from vague color blobs to sharp artistic details.
+% \paragraph{Diffusion Denoising Process.} Figure \ref{fig:diffusion_denoising} displays the iterative denoising process of our TinyUNet model. Starting from pure Gaussian noise (top-left), the model progressively removes noise over 100 DDIM steps to ``crystallize'' a coherent painting. This visualization demonstrates the model's ability to transition from vague color blobs to sharp artistic details.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{images/diffusion_denoising_smooth.png}
-    \caption{Step-by-step denoising process of the TinyUNet Diffusion model (from top-left to bottom-right).}
-    \label{fig:diffusion_denoising}
-\end{figure}
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=0.8\textwidth]{images/diffusion_denoising_smooth.png}
+%     \caption{Step-by-step denoising process of the TinyUNet Diffusion model (from top-left to bottom-right).}
+%     \label{fig:diffusion_denoising}
+% \end{figure}
 
-\paragraph{GAN Latent Space Interpolation.} Figure \ref{fig:dcgan_interpolation} shows a linear interpolation between two random vectors in the DCGAN latent space. The smooth transition between distinct paintings confirms that the generator has learned a continuous manifold rather than simply memorizing training samples.
+% \paragraph{GAN Latent Space Interpolation.} Figure \ref{fig:dcgan_interpolation} shows a linear interpolation between two random vectors in the DCGAN latent space. The smooth transition between distinct paintings confirms that the generator has learned a continuous manifold rather than simply memorizing training samples.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{images/dcgan_interpolation_smooth.png}
-    \caption{Linear interpolation in the DCGAN latent space, showing a smooth transition between two generated paintings.}
-    \label{fig:dcgan_interpolation}
-\end{figure}
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=0.8\textwidth]{images/dcgan_interpolation_smooth.png}
+%     \caption{Linear interpolation in the DCGAN latent space, showing a smooth transition between two generated paintings.}
+%     \label{fig:dcgan_interpolation}
+% \end{figure}
 
 \subsection{Ablations and Discussion}
 Our results highlight several key trade-offs:
