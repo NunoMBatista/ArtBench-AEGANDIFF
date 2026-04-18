@@ -166,7 +166,7 @@ Google DDPM & \texttt{lr} & $\{0.00001,\ 0.00005,\ 0.0002,\ 0.0005,\ 0.01\}$ \\
 \end{tabular}
 \end{table}
 
-To visualize the explored hyperparameter configurations and their performance trends, we used Weights \& Biases sweep diagnostics. Figure \ref{fig:wandb_parallel_coordinates_all} shows \textbf{parallel coordinates} plots (one per model family). Additionally, we performed \textbf{fANOVA-based importance analysis} to estimate which parameters most strongly influenced FID; Figure \ref{fig:fanova_importance_all} displays the importance summaries (one per model family).
+To visualize the explored hyperparameter configurations and their performance trends, we used Weights \& Biases sweep diagnostics. Figure \ref{fig:wandb_parallel_coordinates_all} shows \textbf{parallel coordinates} plots (one per model family). We used \textbf{fANOVA-based importance analysis} to estimate which parameters most influenced FID (Figure \ref{fig:fanova_importance_all}).
 
 \vspace{-0.1cm}
 
@@ -184,7 +184,7 @@ To visualize the explored hyperparameter configurations and their performance tr
         \includegraphics[width=0.33\textwidth]{images/google_parallel.png}
     \end{tabular}
     \vspace{-0.3cm}
-    \caption{Weights \& Biases parallel coordinates plots for the hyperparameter sweeps. }
+    \caption{Weights \& Biases parallel coordinates plots for the hyperparameter sweeps (respectively, VAE, DCGAN, cGAN, Diffusion, Google DDPM)}
     \label{fig:wandb_parallel_coordinates_all}
 \end{figure}
 
